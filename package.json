@@ -57,7 +57,11 @@
     "swiftlint": "node-swiftlint",
     "docgen": "docgen --api LlamaCppPlugin --output-readme README.md --output-json dist/docs.json",
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
+    "build:native": "./build-native.sh",
+    "build:ios": "cd ios && cmake -B build -S . && cmake --build build --config Release",
+    "build:android": "cd android && ./gradlew assembleRelease",
     "clean": "rimraf ./dist",
+    "clean:native": "rimraf ios/build android/build android/src/main/jniLibs",
     "watch": "tsc --watch",
     "prepublishOnly": "npm run build"
   },

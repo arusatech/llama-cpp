@@ -1,5 +1,44 @@
 import Foundation
 
+// MARK: - Native Library Integration
+private var contexts: [Int64: UnsafeMutableRawPointer] = [:]
+private var nextContextId: Int64 = 1
+
+// Load the native library
+private lazy var llamaLibrary: UnsafeMutableRawPointer? = {
+    guard let libraryPath = Bundle.main.path(forResource: "llama-cpp", ofType: "framework") else {
+        print("Error: llama-cpp framework not found")
+        return nil
+    }
+    
+    guard let handle = dlopen(libraryPath, RTLD_NOW) else {
+        print("Error: Failed to load llama-cpp library: \(String(cString: dlerror()))")
+        return nil
+    }
+    
+    return handle
+}()
+
+// Function pointers for native calls
+private var initContextFunc: ((String, UnsafePointer<Int8>) -> Int64)?
+private var releaseContextFunc: ((Int64) -> Void)?
+private var completionFunc: ((Int64, String, UnsafePointer<Int8>) -> String?)?
+private var stopCompletionFunc: ((Int64) -> Void)?
+private var getFormattedChatFunc: ((Int64, String, String) -> String?)?
+private var toggleNativeLogFunc: ((Bool) -> Bool)?
+
+private func loadFunctionPointers() {
+    guard let library = llamaLibrary else { return }
+    
+    // Load function pointers from the native library
+    initContextFunc = unsafeBitCast(dlsym(library, "llama_init_context"), to: ((String, UnsafePointer<Int8>) -> Int64).self)
+    releaseContextFunc = unsafeBitCast(dlsym(library, "llama_release_context"), to: ((Int64) -> Void).self)
+    completionFunc = unsafeBitCast(dlsym(library, "llama_completion"), to: ((Int64, String, UnsafePointer<Int8>) -> String?).self)
+    stopCompletionFunc = unsafeBitCast(dlsym(library, "llama_stop_completion"), to: ((Int64) -> Void).self)
+    getFormattedChatFunc = unsafeBitCast(dlsym(library, "llama_get_formatted_chat"), to: ((Int64, String, String) -> String?).self)
+    toggleNativeLogFunc = unsafeBitCast(dlsym(library, "llama_toggle_native_log"), to: ((Bool) -> Bool).self)
+}
+
 // MARK: - Result Types
 typealias LlamaResult<T> = Result<T, LlamaError>
 
