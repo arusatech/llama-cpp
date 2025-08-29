@@ -1,243 +1,136 @@
-# LlamaCpp Capacitor Plugin
+# llama-cpp Capacitor Plugin
 
-A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference without requiring external servers. This plugin provides a comprehensive interface to llama.cpp functionality, similar to the React Native implementation.
+[![Actions Status](https://github.com/arusatech/llama-cpp/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![npm](https://img.shields.io/npm/v/llama-cpp.svg)](https://www.npmjs.com/package/llama-cpp/)
 
-## Features
+A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
 
-- **Offline AI Inference**: Run large language models directly on device
-- **Cross-Platform**: Works on iOS, Android, and Web (with limitations)
-- **Comprehensive API**: Full access to llama.cpp functionality
-- **Multimodal Support**: Image and audio processing capabilities
-- **TTS Support**: Text-to-speech functionality
-- **LoRA Adapters**: Support for LoRA fine-tuning adapters
+[llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++
+
+## 🚀 Features
+
+- **Offline AI Inference**: Run large language models completely offline on mobile devices
+- **Text Generation**: Complete text completion with streaming support
+- **Chat Conversations**: Multi-turn conversations with context management
+- **Multimodal Support**: Process images and audio alongside text
+- **Text-to-Speech (TTS)**: Generate speech from text using vocoder models
+- **LoRA Adapters**: Fine-tune models with LoRA adapters
+- **Embeddings**: Generate vector embeddings for semantic search
+- **Reranking**: Rank documents by relevance to queries
 - **Session Management**: Save and load conversation states
-- **Embeddings & Reranking**: Advanced text processing capabilities
-- **Benchmarking**: Model performance testing tools
+- **Benchmarking**: Performance testing and optimization tools
+- **Structured Output**: Generate JSON with schema validation
+- **Cross-Platform**: iOS and Android support with native optimizations
 
-## Installation
+## 📦 Installation
 
-### 1. Install the Plugin
-
-```bash
+```sh
 npm install llama-cpp
 ```
 
-### 2. Add to Your Capacitor Project
+### iOS Setup
 
-```bash
-npx cap add llama-cpp
+1. Install the plugin:
+```sh
+npm install llama-cpp
 ```
 
-### 3. Sync Native Projects
-
-```bash
-npx cap sync
+2. Add to your iOS project:
+```sh
+npx cap add ios
+npx cap sync ios
 ```
 
-## Platform Support
+3. Open the project in Xcode:
+```sh
+npx cap open ios
+```
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| iOS | ✅ Supported | Full native implementation |
-| Android | ✅ Supported | Full native implementation |
-| Web | ⚠️ Limited | Placeholder implementation only |
+### Android Setup
 
-## Basic Usage
+1. Install the plugin:
+```sh
+npm install llama-cpp
+```
 
-### Initialize a Model
+2. Add to your Android project:
+```sh
+npx cap add android
+npx cap sync android
+```
+
+3. Open the project in Android Studio:
+```sh
+npx cap open android
+```
+
+## 🎯 Quick Start
+
+### Basic Text Completion
 
 ```typescript
-import { initLlama, LlamaContext } from 'llama-cpp';
+import { initLlama } from 'llama-cpp';
 
-// Initialize a llama.cpp model
+// Initialize a model
 const context = await initLlama({
   model: '/path/to/your/model.gguf',
   n_ctx: 2048,
   n_threads: 4,
-  n_gpu_layers: 0, // Set to > 0 for GPU acceleration on iOS
+  n_gpu_layers: 0,
 });
 
-console.log('Model loaded:', context.model.desc);
-console.log('GPU available:', context.gpu);
-```
-
-### Generate Text Completions
-
-```typescript
-// Simple text completion
+// Generate text
 const result = await context.completion({
-  prompt: "Hello, how are you?",
-  n_predict: 100,
+  prompt: "Hello, how are you today?",
+  n_predict: 50,
   temperature: 0.8,
-  top_p: 0.9,
 });
 
 console.log('Generated text:', result.text);
+```
 
-// Chat-style completion with messages
-const chatResult = await context.completion({
+### Chat-Style Conversations
+
+```typescript
+const result = await context.completion({
   messages: [
-    { role: "system", content: "You are a helpful assistant." },
-    { role: "user", content: "What is the capital of France?" }
+    { role: "system", content: "You are a helpful AI assistant." },
+    { role: "user", content: "What is the capital of France?" },
+    { role: "assistant", content: "The capital of France is Paris." },
+    { role: "user", content: "Tell me more about it." }
   ],
   n_predict: 100,
   temperature: 0.7,
 });
 
-console.log('Chat response:', chatResult.content);
+console.log('Chat response:', result.content);
 ```
 
-### Streaming Completions
+### Streaming Completion
 
 ```typescript
 let fullText = '';
-
 const result = await context.completion({
-  prompt: "Write a short story about a robot:",
-  n_predict: 200,
+  prompt: "Write a short story about a robot learning to paint:",
+  n_predict: 150,
   temperature: 0.8,
 }, (tokenData) => {
   // Called for each token as it's generated
   fullText += tokenData.token;
   console.log('Token:', tokenData.token);
-  console.log('Accumulated text:', fullText);
 });
 
 console.log('Final result:', result.text);
 ```
 
-### Multimodal Support
-
-```typescript
-// Initialize multimodal support
-await context.initMultimodal({
-  path: '/path/to/mmproj.gguf',
-  use_gpu: true,
-});
-
-// Check multimodal capabilities
-const support = await context.getMultimodalSupport();
-console.log('Vision support:', support.vision);
-console.log('Audio support:', support.audio);
-
-// Generate text with image context
-const result = await context.completion({
-  messages: [
-    { role: "user", content: "Describe this image" },
-    { 
-      role: "user", 
-      content: [
-        { type: "text", text: "What do you see in this image?" },
-        { type: "image_url", image_url: { url: "file:///path/to/image.jpg" } }
-      ]
-    }
-  ],
-  n_predict: 150,
-});
-```
-
-### TTS (Text-to-Speech)
-
-```typescript
-// Initialize TTS support
-await context.initVocoder({
-  path: '/path/to/vocoder.gguf',
-  n_batch: 512,
-});
-
-// Generate audio completion
-const audioCompletion = await context.getFormattedAudioCompletion(
-  speaker, // Speaker configuration object
-  "Hello, this is a test of text-to-speech."
-);
-
-// Get guide tokens for audio generation
-const guideTokens = await context.getAudioCompletionGuideTokens(
-  "Hello, this is a test of text-to-speech."
-);
-
-// Generate audio tokens
-const audioResult = await context.completion({
-  prompt: audioCompletion.prompt,
-  grammar: audioCompletion.grammar,
-  guide_tokens: guideTokens,
-  n_predict: 1000,
-});
-
-// Decode audio tokens to audio data
-const audioData = await context.decodeAudioTokens(audioResult.audio_tokens);
-```
-
-### Session Management
-
-```typescript
-// Save current conversation state
-await context.saveSession('/path/to/session.gguf', { tokenSize: 1000 });
-
-// Load previous conversation state
-const session = await context.loadSession('/path/to/session.gguf');
-console.log('Loaded tokens:', session.tokens_loaded);
-console.log('Previous prompt:', session.prompt);
-```
-
-### Embeddings and Reranking
-
-```typescript
-// Generate embeddings
-const embedding = await context.embedding("Hello, world!", {
-  embd_normalize: 1.0
-});
-
-console.log('Embedding vector:', embedding.embedding);
-
-// Rerank documents
-const documents = [
-  "Document about cats",
-  "Document about dogs", 
-  "Document about birds"
-];
-
-const rerankResults = await context.rerank(
-  "Tell me about pets",
-  documents,
-  { normalize: 1.0 }
-);
-
-console.log('Reranked results:', rerankResults);
-```
-
-### LoRA Adapters
-
-```typescript
-// Apply LoRA adapters
-await context.applyLoraAdapters([
-  { path: '/path/to/adapter1.gguf', scaled: 1.0 },
-  { path: '/path/to/adapter2.gguf', scaled: 0.5 }
-]);
-
-// Check loaded adapters
-const adapters = await context.getLoadedLoraAdapters();
-console.log('Loaded adapters:', adapters);
-
-// Remove all adapters
-await context.removeLoraAdapters();
-```
-
-### Benchmarking
-
-```typescript
-// Run performance benchmarks
-const benchResult = await context.bench(128, 128, 128, 10);
-console.log('Benchmark results:', benchResult);
-```
-
-## API Reference
+## 📚 API Reference
 
 ### Core Functions
 
 #### `initLlama(params: ContextParams, onProgress?: (progress: number) => void): Promise<LlamaContext>`
 
-Initialize a new llama.cpp context with the specified model and parameters.
+Initialize a new llama.cpp context with a model.
 
 **Parameters:**
 - `params`: Context initialization parameters
@@ -247,21 +140,29 @@ Initialize a new llama.cpp context with the specified model and parameters.
 
 #### `releaseAllLlama(): Promise<void>`
 
-Release all active contexts and free resources.
+Release all contexts and free memory.
+
+#### `toggleNativeLog(enabled: boolean): Promise<void>`
+
+Enable or disable native logging.
+
+#### `addNativeLogListener(listener: (level: string, text: string) => void): { remove: () => void }`
+
+Add a listener for native log messages.
 
 ### LlamaContext Class
 
 #### `completion(params: CompletionParams, callback?: (data: TokenData) => void): Promise<NativeCompletionResult>`
 
-Generate text completions based on the provided parameters.
+Generate text completion.
 
-#### `stopCompletion(): Promise<void>`
-
-Stop any ongoing completion generation.
+**Parameters:**
+- `params`: Completion parameters including prompt or messages
+- `callback`: Optional callback for token-by-token streaming
 
 #### `tokenize(text: string, options?: { media_paths?: string[] }): Promise<NativeTokenizeResult>`
 
-Tokenize text (and optionally images) using the model's tokenizer.
+Tokenize text or text with images.
 
 #### `detokenize(tokens: number[]): Promise<string>`
 
@@ -269,17 +170,17 @@ Convert tokens back to text.
 
 #### `embedding(text: string, params?: EmbeddingParams): Promise<NativeEmbeddingResult>`
 
-Generate embeddings for the given text.
+Generate embeddings for text.
 
 #### `rerank(query: string, documents: string[], params?: RerankParams): Promise<RerankResult[]>`
 
-Rerank documents based on relevance to the query.
+Rank documents by relevance to a query.
 
 #### `bench(pp: number, tg: number, pl: number, nr: number): Promise<BenchResult>`
 
-Run performance benchmarks.
+Benchmark model performance.
 
-### Multimodal Methods
+### Multimodal Support
 
 #### `initMultimodal(params: { path: string; use_gpu?: boolean }): Promise<boolean>`
 
@@ -297,25 +198,25 @@ Get multimodal capabilities.
 
 Release multimodal resources.
 
-### TTS Methods
+### TTS (Text-to-Speech)
 
 #### `initVocoder(params: { path: string; n_batch?: number }): Promise<boolean>`
 
-Initialize TTS support with a vocoder model.
+Initialize TTS with a vocoder model.
 
 #### `isVocoderEnabled(): Promise<boolean>`
 
-Check if TTS support is enabled.
+Check if TTS is enabled.
 
 #### `getFormattedAudioCompletion(speaker: object | null, textToSpeak: string): Promise<{ prompt: string; grammar?: string }>`
 
 Get formatted audio completion prompt.
 
-#### `getAudioCompletionGuideTokens(textToSpeak: string): Promise<number[]>`
+#### `getAudioCompletionGuideTokens(textToSpeak: string): Promise<Array<number>>`
 
-Get guide tokens for audio generation.
+Get guide tokens for audio completion.
 
-#### `decodeAudioTokens(tokens: number[]): Promise<number[]>`
+#### `decodeAudioTokens(tokens: number[]): Promise<Array<number>>`
 
 Decode audio tokens to audio data.
 
@@ -323,19 +224,9 @@ Decode audio tokens to audio data.
 
 Release TTS resources.
 
-### Session Management
-
-#### `saveSession(filepath: string, options?: { tokenSize: number }): Promise<number>`
-
-Save current conversation state to file.
-
-#### `loadSession(filepath: string): Promise<NativeSessionLoadResult>`
-
-Load conversation state from file.
-
 ### LoRA Adapters
 
-#### `applyLoraAdapters(adapters: Array<{ path: string; scaled?: number }>): Promise<void>`
+#### `applyLoraAdapters(loraList: Array<{ path: string; scaled?: number }>): Promise<void>`
 
 Apply LoRA adapters to the model.
 
@@ -345,9 +236,19 @@ Remove all LoRA adapters.
 
 #### `getLoadedLoraAdapters(): Promise<Array<{ path: string; scaled?: number }>>`
 
-Get list of currently loaded LoRA adapters.
+Get list of loaded LoRA adapters.
 
-## Configuration
+### Session Management
+
+#### `saveSession(filepath: string, options?: { tokenSize: number }): Promise<number>`
+
+Save current session to a file.
+
+#### `loadSession(filepath: string): Promise<NativeSessionLoadResult>`
+
+Load session from a file.
+
+## 🔧 Configuration
 
 ### Context Parameters
 
@@ -355,25 +256,15 @@ Get list of currently loaded LoRA adapters.
 interface ContextParams {
   model: string;                    // Path to GGUF model file
   n_ctx?: number;                   // Context size (default: 512)
-  n_batch?: number;                 // Batch size (default: 512)
-  n_threads?: number;               // Number of threads (default: 1)
-  n_gpu_layers?: number;            // GPU layers (iOS only, default: 0)
-  use_mlock?: boolean;              // Use mlock (default: false)
-  use_mmap?: boolean;               // Use mmap (default: true)
-  vocab_only?: boolean;             // Load vocabulary only (default: false)
-  embedding?: boolean;              // Enable embedding mode (default: false)
-  flash_attn?: boolean;             // Enable flash attention (default: false)
-  cache_type_k?: string;            // KV cache K type
-  cache_type_v?: string;            // KV cache V type
-  pooling_type?: 'none' | 'mean' | 'cls' | 'last' | 'rank';
-  lora?: string;                    // Single LoRA adapter path
-  lora_list?: Array<{ path: string; scaled?: number }>;
-  rope_freq_base?: number;          // RoPE frequency base
-  rope_freq_scale?: number;         // RoPE frequency scale
-  ctx_shift?: boolean;              // Enable context shifting
-  kv_unified?: boolean;             // Use unified KV buffer
-  swa_full?: boolean;               // Use full-size SWA cache
-  n_cpu_moe?: number;               // CPU MoE layers
+  n_threads?: number;               // Number of threads (default: 4)
+  n_gpu_layers?: number;            // GPU layers (iOS only)
+  use_mlock?: boolean;              // Lock memory (default: false)
+  use_mmap?: boolean;               // Use memory mapping (default: true)
+  embedding?: boolean;              // Embedding mode (default: false)
+  cache_type_k?: string;            // KV cache type for K
+  cache_type_v?: string;            // KV cache type for V
+  pooling_type?: string;            // Pooling type
+  // ... more parameters
 }
 ```
 
@@ -382,106 +273,210 @@ interface ContextParams {
 ```typescript
 interface CompletionParams {
   prompt?: string;                  // Text prompt
-  messages?: LlamaCppOAICompatibleMessage[]; // Chat messages
-  n_predict?: number;               // Max tokens to predict (-1 = unlimited)
-  n_probs?: number;                 // Number of token probabilities
-  top_k?: number;                   // Top-k sampling (default: 40)
-  top_p?: number;                   // Top-p sampling (default: 0.95)
-  min_p?: number;                   // Min-p sampling (default: 0.05)
-  temperature?: number;             // Temperature (default: 0.8)
-  penalty_last_n?: number;          // Repetition penalty window
-  penalty_repeat?: number;          // Repetition penalty (default: 1.0)
-  penalty_freq?: number;            // Frequency penalty (default: 0.0)
-  penalty_present?: number;         // Presence penalty (default: 0.0)
-  mirostat?: number;                // Mirostat mode (0, 1, 2)
-  mirostat_tau?: number;            // Mirostat tau (default: 5.0)
-  mirostat_eta?: number;            // Mirostat eta (default: 0.1)
+  messages?: Message[];             // Chat messages
+  n_predict?: number;               // Max tokens to generate
+  temperature?: number;             // Sampling temperature
+  top_p?: number;                   // Top-p sampling
+  top_k?: number;                   // Top-k sampling
   stop?: string[];                  // Stop sequences
-  ignore_eos?: boolean;             // Ignore EOS token
-  seed?: number;                    // Random seed (-1 = random)
-  logit_bias?: number[][];          // Logit bias
-  grammar?: string;                 // Grammar string
-  grammar_lazy?: boolean;           // Lazy grammar parsing
-  json_schema?: string;             // JSON schema for structured output
-  media_paths?: string[];           // Image/audio file paths
-  response_format?: CompletionResponseFormat;
+  // ... more parameters
 }
 ```
 
-## Model Compatibility
+## 📱 Platform Support
 
-This plugin supports GGUF format models that are compatible with llama.cpp. Popular models include:
+| Feature | iOS | Android | Web |
+|---------|-----|---------|-----|
+| Text Generation | ✅ | ✅ | ❌ |
+| Chat Conversations | ✅ | ✅ | ❌ |
+| Streaming | ✅ | ✅ | ❌ |
+| Multimodal | ✅ | ✅ | ❌ |
+| TTS | ✅ | ✅ | ❌ |
+| LoRA Adapters | ✅ | ✅ | ❌ |
+| Embeddings | ✅ | ✅ | ❌ |
+| Reranking | ✅ | ✅ | ❌ |
+| Session Management | ✅ | ✅ | ❌ |
+| Benchmarking | ✅ | ✅ | ❌ |
 
-- **Llama 2** (7B, 13B, 70B variants)
-- **Code Llama** (7B, 13B, 34B variants)
-- **Mistral** (7B, 8x7B variants)
-- **Phi-2** and **Phi-3**
-- **Gemma** (2B, 7B variants)
-- **Qwen** (1.5B, 7B, 14B, 72B variants)
-- **Custom fine-tuned models**
+## 🎨 Advanced Examples
 
-## Performance Considerations
+### Multimodal Processing
 
-### Memory Usage
-- Model size directly affects memory usage
-- Consider using quantized models (Q4_K_M, Q5_K_M, etc.)
-- Adjust `n_ctx` based on available memory
+```typescript
+// Initialize multimodal support
+await context.initMultimodal({
+  path: '/path/to/mmproj.gguf',
+  use_gpu: true,
+});
 
-### Speed Optimization
-- Use GPU acceleration on iOS with `n_gpu_layers > 0`
+// Process image with text
+const result = await context.completion({
+  messages: [
+    { 
+      role: "user", 
+      content: [
+        { type: "text", text: "What do you see in this image?" },
+        { type: "image_url", image_url: { url: "file:///path/to/image.jpg" } }
+      ]
+    }
+  ],
+  n_predict: 100,
+});
+
+console.log('Image analysis:', result.content);
+```
+
+### Text-to-Speech
+
+```typescript
+// Initialize TTS
+await context.initVocoder({
+  path: '/path/to/vocoder.gguf',
+  n_batch: 512,
+});
+
+// Generate audio
+const audioCompletion = await context.getFormattedAudioCompletion(
+  null, // Speaker configuration
+  "Hello, this is a test of text-to-speech functionality."
+);
+
+const guideTokens = await context.getAudioCompletionGuideTokens(
+  "Hello, this is a test of text-to-speech functionality."
+);
+
+const audioResult = await context.completion({
+  prompt: audioCompletion.prompt,
+  grammar: audioCompletion.grammar,
+  guide_tokens: guideTokens,
+  n_predict: 1000,
+});
+
+const audioData = await context.decodeAudioTokens(audioResult.audio_tokens);
+```
+
+### LoRA Adapters
+
+```typescript
+// Apply LoRA adapters
+await context.applyLoraAdapters([
+  { path: '/path/to/adapter1.gguf', scaled: 1.0 },
+  { path: '/path/to/adapter2.gguf', scaled: 0.5 }
+]);
+
+// Check loaded adapters
+const adapters = await context.getLoadedLoraAdapters();
+console.log('Loaded adapters:', adapters);
+
+// Generate with adapters
+const result = await context.completion({
+  prompt: "Test prompt with LoRA adapters:",
+  n_predict: 50,
+});
+
+// Remove adapters
+await context.removeLoraAdapters();
+```
+
+### Structured Output
+
+```typescript
+const result = await context.completion({
+  prompt: "Generate a JSON object with a person's name, age, and favorite color:",
+  n_predict: 100,
+  response_format: {
+    type: 'json_schema',
+    json_schema: {
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          age: { type: 'number' },
+          favorite_color: { type: 'string' }
+        },
+        required: ['name', 'age', 'favorite_color']
+      }
+    }
+  }
+});
+
+console.log('Structured output:', result.content);
+```
+
+## 🔍 Model Compatibility
+
+This plugin supports GGUF format models, which are compatible with llama.cpp. You can find GGUF models on Hugging Face by searching for the "GGUF" tag.
+
+### Recommended Models
+
+- **Llama 2**: Meta's latest language model
+- **Mistral**: High-performance open model
+- **Code Llama**: Specialized for code generation
+- **Phi-2**: Microsoft's efficient model
+- **Gemma**: Google's open model
+
+### Model Quantization
+
+For mobile devices, consider using quantized models (Q4_K_M, Q5_K_M, etc.) to reduce memory usage and improve performance.
+
+## ⚡ Performance Considerations
+
+### Memory Management
+
+- Use quantized models for better memory efficiency
+- Adjust `n_ctx` based on your use case
+- Monitor memory usage with `use_mlock: false`
+
+### GPU Acceleration
+
+- iOS: Set `n_gpu_layers` to use Metal GPU acceleration
+- Android: GPU acceleration is automatically enabled when available
+
+### Threading
+
 - Adjust `n_threads` based on device capabilities
-- Use `n_batch` to balance memory and speed
+- More threads may improve performance but increase memory usage
 
-### Battery Life
-- Lower `n_threads` for better battery life
-- Use smaller models for mobile devices
-- Consider `use_mlock: false` to allow memory swapping
-
-## Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-**"Context not found" error**
-- Ensure the context was properly initialized
-- Check that the context ID is valid
-
-**"Model not found" error**
-- Verify the model file path is correct
-- Ensure the model file is accessible to the app
-
-**"Context limit reached" error**
-- Increase the context limit with `setContextLimit()`
-- Release unused contexts with `releaseContext()`
-
-**Performance issues**
-- Use quantized models for better performance
-- Adjust `n_threads` and `n_batch` parameters
-- Enable GPU acceleration on iOS if available
+1. **Model not found**: Ensure the model path is correct and the file exists
+2. **Out of memory**: Try using a quantized model or reducing `n_ctx`
+3. **Slow performance**: Enable GPU acceleration or increase `n_threads`
+4. **Multimodal not working**: Ensure the mmproj file is compatible with your model
 
 ### Debugging
 
 Enable native logging to see detailed information:
 
 ```typescript
-import { toggleNativeLog } from 'llama-cpp';
+import { toggleNativeLog, addNativeLogListener } from 'llama-cpp';
 
 await toggleNativeLog(true);
+
+const logListener = addNativeLogListener((level, text) => {
+  console.log(`[${level}] ${text}`);
+});
 ```
 
-## Contributing
+## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-## License
+## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) - The core inference engine
-- [llama.rn](https://github.com/mybigday/llama.rn) - React Native implementation that inspired this plugin
-- [Capacitor](https://capacitorjs.com/) - The cross-platform native runtime
+- [Capacitor](https://capacitorjs.com/) - The cross-platform runtime
+- [llama.rn](https://github.com/mybigday/llama.rn) - Inspiration for the React Native implementation
 
-## Support
+## 📞 Support
 
-For support, please open an issue on GitHub or check the documentation.
+- 📧 Email: support@arusatech.com
+- 🐛 Issues: [GitHub Issues](https://github.com/arusatech/llama-cpp/issues)
+- 📖 Documentation: [GitHub Wiki](https://github.com/arusatech/llama-cpp/wiki)

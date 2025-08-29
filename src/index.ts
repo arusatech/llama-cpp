@@ -1,40 +1,46 @@
 import { registerPlugin } from '@capacitor/core';
-import type { 
-  LlamaCppPlugin,
+import type {
   NativeContextParams,
-  NativeCompletionParams,
-  NativeEmbeddingParams,
-  NativeRerankParams,
   NativeLlamaContext,
+  NativeCompletionParams,
+  NativeCompletionTokenProb,
   NativeCompletionResult,
   NativeTokenizeResult,
   NativeEmbeddingResult,
   NativeSessionLoadResult,
+  NativeEmbeddingParams,
+  NativeRerankParams,
   NativeRerankResult,
+  NativeCompletionTokenProbItem,
+  NativeCompletionResultTimings,
   JinjaFormattedChatResult,
+  FormattedChatResult,
+  NativeImageProcessingResult,
+  NativeLlamaChatMessage,
+  LlamaCppMessagePart,
+  LlamaCppOAICompatibleMessage,
   ContextParams,
-  CompletionParams,
   EmbeddingParams,
   RerankParams,
   RerankResult,
+  CompletionResponseFormat,
+  CompletionParams,
   BenchResult,
-  TokenData,
-  ToolCall,
-  LlamaCppOAICompatibleMessage,
-  LlamaCppMessagePart,
-  CompletionResponseFormat
+  LlamaCppPlugin,
 } from './definitions';
 
-const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp', {
-  web: () => import('./web').then((m) => new m.LlamaCppWeb()),
-});
+// Constants
+export const LLAMACPP_MTMD_DEFAULT_MEDIA_MARKER = '<__media__>';
 
-export const LLAMA_CPP_MTMD_DEFAULT_MEDIA_MARKER = '<__media__>';
-
+// Event names
 const EVENT_ON_INIT_CONTEXT_PROGRESS = '@LlamaCpp_onInitContextProgress';
 const EVENT_ON_TOKEN = '@LlamaCpp_onToken';
 const EVENT_ON_NATIVE_LOG = '@LlamaCpp_onNativeLog';
 
+// Register the plugin
+const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp');
+
+// Log listeners management
 const logListeners: Array<(level: string, text: string) => void> = [];
 
 // Set up native log listener
@@ -43,7 +49,76 @@ LlamaCpp.addListener(EVENT_ON_NATIVE_LOG, (evt: { level: string; text: string })
 });
 
 // Trigger unset to use default log callback
-LlamaCpp.toggleNativeLog({ enabled: false }).catch(() => {});
+LlamaCpp?.toggleNativeLog?.({ enabled: false })?.catch?.(() => {});
+
+// High-level types for the plugin interface
+export type RNLlamaMessagePart = LlamaCppMessagePart;
+export type RNLlamaOAICompatibleMessage = LlamaCppOAICompatibleMessage;
+
+// Re-export all types from definitions
+export type {
+  NativeContextParams,
+  NativeLlamaContext,
+  NativeCompletionParams,
+  NativeCompletionTokenProb,
+  NativeCompletionResult,
+  NativeTokenizeResult,
+  NativeEmbeddingResult,
+  NativeSessionLoadResult,
+  NativeEmbeddingParams,
+  NativeRerankParams,
+  NativeRerankResult,
+  NativeCompletionTokenProbItem,
+  NativeCompletionResultTimings,
+  FormattedChatResult,
+  JinjaFormattedChatResult,
+  NativeImageProcessingResult,
+  ContextParams,
+  EmbeddingParams,
+  RerankParams,
+  RerankResult,
+  CompletionResponseFormat,
+  CompletionParams,
+  BenchResult,
+};
+
+export const RNLLAMA_MTMD_DEFAULT_MEDIA_MARKER = LLAMACPP_MTMD_DEFAULT_MEDIA_MARKER;
+
+export type ToolCall = {
+  type: 'function';
+  id?: string;
+  function: {
+    name: string;
+    arguments: string; // JSON string
+  };
+};
+
+export type TokenData = {
+  token: string;
+  completion_probabilities?: Array<NativeCompletionTokenProb>;
+  // Parsed content from accumulated text
+  content?: string;
+  reasoning_content?: string;
+  tool_calls?: Array<ToolCall>;
+  accumulated_text?: string;
+};
+
+type TokenNativeEvent = {
+  contextId: number;
+  tokenResult: TokenData;
+};
+
+const validCacheTypes = [
+  'f16',
+  'f32',
+  'bf16',
+  'q8_0',
+  'q4_0',
+  'q4_1',
+  'iq4_nl',
+  'q5_0',
+  'q5_1',
+];
 
 const getJsonSchema = (responseFormat?: CompletionResponseFormat) => {
   if (responseFormat?.type === 'json_schema') {
@@ -101,7 +176,7 @@ export class LlamaContext {
   }
 
   async getFormattedChat(
-    messages: LlamaCppOAICompatibleMessage[],
+    messages: RNLlamaOAICompatibleMessage[],
     template?: string | null,
     params?: {
       jinja?: boolean;
@@ -114,7 +189,7 @@ export class LlamaContext {
       now?: string | number;
       chat_template_kwargs?: Record<string, string>;
     },
-  ): Promise<JinjaFormattedChatResult | { type: 'llama-chat'; prompt: string; has_media: boolean; media_paths?: Array<string> }> {
+  ): Promise<FormattedChatResult | JinjaFormattedChatResult> {
     const mediaPaths: string[] = [];
     const chat = messages.map((msg) => {
       if (Array.isArray(msg.content)) {
@@ -126,7 +201,7 @@ export class LlamaContext {
             mediaPaths.push(path);
             return {
               type: 'text',
-              text: LLAMA_CPP_MTMD_DEFAULT_MEDIA_MARKER,
+              text: RNLLAMA_MTMD_DEFAULT_MEDIA_MARKER,
             };
           } else if (part.type === 'input_audio') {
             const { input_audio: audio } = part;
@@ -144,7 +219,7 @@ export class LlamaContext {
             }
             return {
               type: 'text',
-              text: LLAMA_CPP_MTMD_DEFAULT_MEDIA_MARKER,
+              text: RNLLAMA_MTMD_DEFAULT_MEDIA_MARKER,
             };
           }
           return part;
@@ -156,7 +231,7 @@ export class LlamaContext {
         };
       }
       return msg;
-    });
+    }) as NativeLlamaChatMessage[];
 
     const useJinja = this.isJinjaSupported() && params?.jinja;
     let tmpl;
@@ -216,7 +291,7 @@ export class LlamaContext {
     params: CompletionParams,
     callback?: (data: TokenData) => void,
   ): Promise<NativeCompletionResult> {
-    const nativeParams: NativeCompletionParams = {
+    const nativeParams = {
       ...params,
       prompt: params.prompt || '',
       emit_partial_completion: !!callback,
@@ -258,7 +333,7 @@ export class LlamaContext {
           nativeParams.media_paths = jinjaResult.media_paths;
         }
       } else if (formattedResult.type === 'llama-chat') {
-        const llamaChatResult = formattedResult as { type: 'llama-chat'; prompt: string; has_media: boolean; media_paths?: Array<string> };
+        const llamaChatResult = formattedResult as FormattedChatResult;
         nativeParams.prompt = llamaChatResult.prompt || '';
         if (llamaChatResult.has_media) {
           nativeParams.media_paths = llamaChatResult.media_paths;
@@ -280,7 +355,7 @@ export class LlamaContext {
 
     let tokenListener: any =
       callback &&
-      LlamaCpp.addListener(EVENT_ON_TOKEN, (evt: { contextId: number; tokenResult: TokenData }) => {
+      LlamaCpp.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
         const { contextId, tokenResult } = evt;
         if (contextId !== this.id) return;
         callback(tokenResult);
@@ -506,10 +581,7 @@ export class LlamaContext {
   async getAudioCompletionGuideTokens(
     textToSpeak: string,
   ): Promise<Array<number>> {
-    return await LlamaCpp.getAudioCompletionGuideTokens({ 
-      contextId: this.id, 
-      textToSpeak 
-    });
+    return await LlamaCpp.getAudioCompletionGuideTokens({ contextId: this.id, textToSpeak });
   }
 
   /**
@@ -620,18 +692,6 @@ export async function initLlama(
 
   const poolType = poolTypeMap[poolingType as keyof typeof poolTypeMap];
 
-  const validCacheTypes = [
-    'f16',
-    'f32',
-    'bf16',
-    'q8_0',
-    'q4_0',
-    'q4_1',
-    'iq4_nl',
-    'q5_0',
-    'q5_1',
-  ];
-
   if (rest.cache_type_k && !validCacheTypes.includes(rest.cache_type_k)) {
     console.warn(`[LlamaCpp] initLlama: Invalid cache K type: ${rest.cache_type_k}, falling back to f16`);
     delete rest.cache_type_k;
@@ -677,8 +737,8 @@ export async function releaseAllLlama(): Promise<void> {
 
 export const BuildInfo = {
   number: '1.0.0',
-  commit: 'development',
+  commit: 'capacitor-llama-cpp',
 };
 
-export * from './definitions';
+// Re-export the plugin for direct access
 export { LlamaCpp };

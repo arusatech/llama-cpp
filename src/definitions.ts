@@ -1,3 +1,4 @@
+// Native parameter types that match llama.rn exactly
 export interface NativeEmbeddingParams {
   embd_normalize?: number;
 }
@@ -534,7 +535,7 @@ export interface CompletionBaseParams {
   parallel_tool_calls?: object;
   tool_choice?: string;
   response_format?: CompletionResponseFormat;
-  media_paths?: string | string[];
+  media_paths?: string[];
   add_generation_prompt?: boolean;
   /*
    * Timestamp in seconds since epoch to apply to chat template's strftime_now
