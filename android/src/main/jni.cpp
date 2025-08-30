@@ -4,6 +4,11 @@
 #include <cstring>
 #include <memory>
 
+// Add missing symbol
+namespace rnllama {
+    bool rnllama_verbose = false;
+}
+
 #define LOG_TAG "LlamaCpp"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -123,7 +128,7 @@ jclass find_class(JNIEnv* env, const char* name) {
 }
 
 // Global context storage
-static std::map<jlong, std::unique_ptr<llama_rn_context>> contexts;
+static std::map<jlong, std::unique_ptr<rnllama::llama_rn_context>> contexts;
 static jlong next_context_id = 1;
 
 extern "C" {
@@ -136,15 +141,19 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContext(
         std::string model_path_str = jstring_to_string(env, model_path);
         
         // Create new context
-        auto context = std::make_unique<llama_rn_context>();
+        auto context = std::make_unique<rnllama::llama_rn_context>();
         
-        // Initialize common parameters (simplified)
+        // Initialize common parameters
         common_params cparams;
-        cparams.model = model_path_str;
+        cparams.model.path = model_path_str;
         cparams.n_ctx = 2048;
         cparams.n_batch = 512;
-        cparams.n_threads = 4;
         cparams.n_gpu_layers = 0;
+        cparams.rope_freq_base = 10000.0f;
+        cparams.rope_freq_scale = 1.0f;
+        cparams.use_mmap = true;
+        cparams.use_mlock = false;
+        cparams.numa = LM_GGML_NUMA_STRATEGY_DISABLED;
         
         // Load model
         if (!context->loadModel(cparams)) {
@@ -156,7 +165,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContext(
         jlong context_id = next_context_id++;
         contexts[context_id] = std::move(context);
         
-        LOGI("Initialized context %lld with model: %s", context_id, model_path_str.c_str());
+        LOGI("Initialized context %ld with model: %s", context_id, model_path_str.c_str());
         return context_id;
         
     } catch (const std::exception& e) {
@@ -174,7 +183,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_releaseContext(
         auto it = contexts.find(context_id);
         if (it != contexts.end()) {
             contexts.erase(it);
-            LOGI("Released context %lld", context_id);
+            LOGI("Released context %ld", context_id);
         }
     } catch (const std::exception& e) {
         LOGE("Exception in releaseContext: %s", e.what());
@@ -195,10 +204,14 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_completion(
         
         std::string prompt_str = jstring_to_string(env, prompt);
         
-        // Simplified completion (placeholder implementation)
-        std::string result = "Generated text for: " + prompt_str;
+        // Get the context
+        rnllama::llama_rn_context* context = it->second.get();
         
-        LOGI("Completion for context %lld: %s", context_id, prompt_str.c_str());
+        // For now, return a simple completion
+        // In a full implementation, this would use the actual llama.cpp completion logic
+        std::string result = "Generated response for: " + prompt_str;
+        
+        LOGI("Completion for context %ld: %s", context_id, prompt_str.c_str());
         return string_to_jstring(env, result);
         
     } catch (const std::exception& e) {
@@ -216,7 +229,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_stopCompletion(
         auto it = contexts.find(context_id);
         if (it != contexts.end()) {
             // Stop completion logic would go here
-            LOGI("Stopped completion for context %lld", context_id);
+            LOGI("Stopped completion for context %ld", context_id);
         }
     } catch (const std::exception& e) {
         LOGE("Exception in stopCompletion: %s", e.what());
@@ -238,10 +251,12 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_getFormattedChat(
         std::string messages_str = jstring_to_string(env, messages);
         std::string template_str = jstring_to_string(env, chat_template);
         
-        // Simplified chat formatting (placeholder implementation)
-        std::string result = "Formatted chat: " + messages_str;
+        rnllama::llama_rn_context* context = it->second.get();
         
-        LOGI("Formatted chat for context %lld", context_id);
+        // Format chat using the context's method
+        std::string result = context->getFormattedChat(messages_str, template_str);
+        
+        LOGI("Formatted chat for context %ld", context_id);
         return string_to_jstring(env, result);
         
     } catch (const std::exception& e) {
@@ -256,7 +271,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_toggleNativeLog(
     JNIEnv* env, jobject thiz, jboolean enabled) {
     
     try {
-        rnllama_verbose = jboolean_to_bool(enabled);
+        rnllama::rnllama_verbose = jboolean_to_bool(enabled);
         LOGI("Native logging %s", enabled ? "enabled" : "disabled");
         return bool_to_jboolean(true);
     } catch (const std::exception& e) {

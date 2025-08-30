@@ -19,6 +19,17 @@ DerivedData/
 .env
 models
 
+# Build artifacts
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.out
+
 
 # macOS files
 .DS_Store

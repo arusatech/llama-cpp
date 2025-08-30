@@ -55,6 +55,7 @@ set(
     ${LLAMACPP_LIB_DIR}/llama.cpp
     ${LLAMACPP_LIB_DIR}/llama-model.cpp
     ${LLAMACPP_LIB_DIR}/llama-model-loader.cpp
+    ${LLAMACPP_LIB_DIR}/llama-model-saver.cpp
     ${LLAMACPP_LIB_DIR}/llama-kv-cache.cpp
     ${LLAMACPP_LIB_DIR}/llama-kv-cache-iswa.cpp
     ${LLAMACPP_LIB_DIR}/llama-memory-hybrid.cpp
@@ -85,12 +86,9 @@ set(
 find_library(LOG_LIB log)
 
 function(build_library target_name arch cpu_flags)
-    if (NOT ${arch} STREQUAL "generic")
-        set(SOURCE_FILES_ARCH
-            ${LLAMACPP_LIB_DIR}/ggml-cpu/arch/${arch}/quants.c
-            ${LLAMACPP_LIB_DIR}/ggml-cpu/arch/${arch}/repack.cpp
-        )
-    endif ()
+    set(SOURCE_FILES_ARCH "")
+    # For now, use generic implementation for all architectures
+    # This ensures we have all required functions
 
     add_library(
         ${target_name}

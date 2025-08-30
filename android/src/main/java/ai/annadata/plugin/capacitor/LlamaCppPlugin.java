@@ -1,5 +1,6 @@
 package ai.annadata.plugin.capacitor;
 
+import android.util.Log;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.Plugin;
@@ -11,8 +12,15 @@ import org.json.JSONException;
 
 @CapacitorPlugin(name = "LlamaCpp")
 public class LlamaCppPlugin extends Plugin {
+    private static final String TAG = "LlamaCppPlugin";
 
     private LlamaCpp implementation = new LlamaCpp();
+
+    @Override
+    public void load() {
+        super.load();
+        Log.i(TAG, "LlamaCppPlugin loaded successfully");
+    }
 
     // MARK: - Core initialization and management
 
@@ -72,6 +80,7 @@ public class LlamaCppPlugin extends Plugin {
 
     @PluginMethod
     public void initContext(PluginCall call) {
+        Log.i(TAG, "initContext called with contextId: " + call.getInt("contextId", 0));
         int contextId = call.getInt("contextId", 0);
         JSObject params = call.getObject("params", new JSObject());
 

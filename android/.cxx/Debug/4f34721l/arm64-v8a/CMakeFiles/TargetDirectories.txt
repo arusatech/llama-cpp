@@ -1,0 +1,3 @@
+C:/annadata/prod/llama-cpp/android/.cxx/Debug/4f34721l/arm64-v8a/CMakeFiles/llama-cpp-arm64-v8a.dir
+C:/annadata/prod/llama-cpp/android/.cxx/Debug/4f34721l/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/annadata/prod/llama-cpp/android/.cxx/Debug/4f34721l/arm64-v8a/CMakeFiles/rebuild_cache.dir

@@ -51,6 +51,7 @@ class LlamaContext {
     private LlamaModel model;
     private boolean isMultimodalEnabled = false;
     private boolean isVocoderEnabled = false;
+    private long nativeContextId = -1;
 
     public LlamaContext(int id) {
         this.id = id;
@@ -82,6 +83,14 @@ class LlamaContext {
 
     public void setVocoderEnabled(boolean vocoderEnabled) {
         isVocoderEnabled = vocoderEnabled;
+    }
+
+    public long getNativeContextId() {
+        return nativeContextId;
+    }
+
+    public void setNativeContextId(long nativeContextId) {
+        this.nativeContextId = nativeContextId;
     }
 }
 
@@ -231,16 +240,39 @@ public class LlamaCpp {
     private int contextLimit = 10;
     private boolean nativeLogEnabled = false;
 
+    // Native method declarations
+    private native long initContextNative(String modelPath, JSObject params);
+    private native void releaseContextNative(long nativeContextId);
+    private native String completionNative(long contextId, String prompt);
+    private native void stopCompletionNative(long contextId);
+    private native String getFormattedChatNative(long contextId, String messages, String chatTemplate);
+    private native boolean toggleNativeLogNative(boolean enabled);
+
+    static {
+        try {
+            System.loadLibrary("llama-cpp");
+            Log.i(TAG, "Successfully loaded llama-cpp native library");
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "Failed to load llama-cpp native library: " + e.getMessage());
+            throw e;
+        }
+    }
+
     // MARK: - Core initialization and management
 
     public void toggleNativeLog(boolean enabled, LlamaCallback<Void> callback) {
-        nativeLogEnabled = enabled;
-        if (enabled) {
-            Log.i(TAG, "Native logging enabled");
-        } else {
-            Log.i(TAG, "Native logging disabled");
+        try {
+            boolean result = toggleNativeLogNative(enabled);
+            nativeLogEnabled = enabled;
+            if (enabled) {
+                Log.i(TAG, "Native logging enabled");
+            } else {
+                Log.i(TAG, "Native logging disabled");
+            }
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to toggle native log: " + e.getMessage())));
         }
-        callback.onResult(LlamaResult.success(null));
     }
 
     public void setContextLimit(int limit, LlamaCallback<Void> callback) {
@@ -268,89 +300,70 @@ public class LlamaCpp {
             return;
         }
 
-        // Extract parameters
-        String modelPath = params.getString("model");
-        if (modelPath == null) {
-            callback.onResult(LlamaResult.failure(new LlamaError("Invalid parameters")));
-            return;
+        try {
+            // Extract parameters
+            String modelPath = params.getString("model");
+            if (modelPath == null || modelPath.isEmpty()) {
+                callback.onResult(LlamaResult.failure(new LlamaError("Model path is required")));
+                return;
+            }
+
+            // Call native initialization
+            long nativeContextId = initContextNative(modelPath, params);
+            if (nativeContextId < 0) {
+                callback.onResult(LlamaResult.failure(new LlamaError("Failed to initialize native context")));
+                return;
+            }
+
+            // Create Java context wrapper
+            LlamaContext context = new LlamaContext(contextId);
+            context.setNativeContextId(nativeContextId);
+            contexts.put(contextId, context);
+
+            // Return context info
+            Map<String, Object> contextInfo = new HashMap<>();
+            contextInfo.put("contextId", contextId);
+            contextInfo.put("gpu", false);
+            contextInfo.put("reasonNoGPU", "Currently not supported");
+
+            Map<String, Object> modelInfo = new HashMap<>();
+            modelInfo.put("desc", "Loaded model");
+            modelInfo.put("size", 0);
+            modelInfo.put("nEmbd", 0);
+            modelInfo.put("nParams", 0);
+            modelInfo.put("path", modelPath);
+
+            contextInfo.put("model", modelInfo);
+            contextInfo.put("androidLib", "llama-cpp");
+
+            callback.onResult(LlamaResult.success(contextInfo));
+            
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Context initialization failed: " + e.getMessage())));
         }
-
-        // Create context
-        LlamaContext context = new LlamaContext(contextId);
-
-        // Create model info (this would typically load from GGUF file)
-        MinjaCaps defaultCaps = new MinjaCaps(true, true, true, true, true, true);
-        MinjaCaps toolUseCaps = new MinjaCaps(true, true, true, true, true, true);
-        MinjaTemplates minja = new MinjaTemplates(true, defaultCaps, true, toolUseCaps);
-        ChatTemplates chatTemplates = new ChatTemplates(true, minja);
-
-        LlamaModel model = new LlamaModel(
-            modelPath,
-            "Sample model",
-            0,
-            0,
-            0,
-            chatTemplates,
-            new HashMap<>()
-        );
-
-        context.setModel(model);
-        contexts.put(contextId, context);
-
-        // Return context info
-        Map<String, Object> contextInfo = new HashMap<>();
-        contextInfo.put("contextId", contextId);
-        contextInfo.put("gpu", false);
-        contextInfo.put("reasonNoGPU", "Not implemented");
-
-        Map<String, Object> modelInfo = new HashMap<>();
-        modelInfo.put("desc", model.getDesc());
-        modelInfo.put("size", model.getSize());
-        modelInfo.put("nEmbd", model.getNEmbd());
-        modelInfo.put("nParams", model.getNParams());
-
-        Map<String, Object> chatTemplatesInfo = new HashMap<>();
-        chatTemplatesInfo.put("llamaChat", model.getChatTemplates().isLlamaChat());
-
-        Map<String, Object> minjaInfo = new HashMap<>();
-        minjaInfo.put("default", model.getChatTemplates().getMinja().isDefault());
-
-        Map<String, Object> defaultCapsInfo = new HashMap<>();
-        defaultCapsInfo.put("tools", model.getChatTemplates().getMinja().getDefaultCaps().isTools());
-        defaultCapsInfo.put("toolCalls", model.getChatTemplates().getMinja().getDefaultCaps().isToolCalls());
-        defaultCapsInfo.put("toolResponses", model.getChatTemplates().getMinja().getDefaultCaps().isToolResponses());
-        defaultCapsInfo.put("systemRole", model.getChatTemplates().getMinja().getDefaultCaps().isSystemRole());
-        defaultCapsInfo.put("parallelToolCalls", model.getChatTemplates().getMinja().getDefaultCaps().isParallelToolCalls());
-        defaultCapsInfo.put("toolCallId", model.getChatTemplates().getMinja().getDefaultCaps().isToolCallId());
-
-        Map<String, Object> toolUseCapsInfo = new HashMap<>();
-        toolUseCapsInfo.put("tools", model.getChatTemplates().getMinja().getToolUseCaps().isTools());
-        toolUseCapsInfo.put("toolCalls", model.getChatTemplates().getMinja().getToolUseCaps().isToolCalls());
-        toolUseCapsInfo.put("toolResponses", model.getChatTemplates().getMinja().getToolUseCaps().isToolResponses());
-        toolUseCapsInfo.put("systemRole", model.getChatTemplates().getMinja().getToolUseCaps().isSystemRole());
-        toolUseCapsInfo.put("parallelToolCalls", model.getChatTemplates().getMinja().getToolUseCaps().isParallelToolCalls());
-        toolUseCapsInfo.put("toolCallId", model.getChatTemplates().getMinja().getToolUseCaps().isToolCallId());
-
-        minjaInfo.put("defaultCaps", defaultCapsInfo);
-        minjaInfo.put("toolUse", model.getChatTemplates().getMinja().isToolUse());
-        minjaInfo.put("toolUseCaps", toolUseCapsInfo);
-
-        chatTemplatesInfo.put("minja", minjaInfo);
-        modelInfo.put("chatTemplates", chatTemplatesInfo);
-        modelInfo.put("metadata", model.getMetadata());
-        modelInfo.put("isChatTemplateSupported", true);
-
-        contextInfo.put("model", modelInfo);
-
-        callback.onResult(LlamaResult.success(contextInfo));
     }
 
     public void releaseContext(int contextId, LlamaCallback<Void> callback) {
-        if (contexts.remove(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-        callback.onResult(LlamaResult.success(null));
+
+        try {
+            // Release native context
+            if (context.getNativeContextId() >= 0) {
+                releaseContextNative(context.getNativeContextId());
+            }
+            
+            // Remove from Java context map
+            contexts.remove(contextId);
+            
+            callback.onResult(LlamaResult.success(null));
+            
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to release context: " + e.getMessage())));
+        }
     }
 
     public void releaseAllContexts(LlamaCallback<Void> callback) {
@@ -367,15 +380,22 @@ public class LlamaCpp {
             return;
         }
 
-        // This would typically format the chat using the model's chat templates
-        // For now, return a basic formatted chat
-        Map<String, Object> formattedChat = new HashMap<>();
-        formattedChat.put("type", "llama-chat");
-        formattedChat.put("prompt", messages);
-        formattedChat.put("has_media", false);
-        formattedChat.put("media_paths", new String[0]);
+        try {
+            // Call native formatted chat
+            String result = getFormattedChatNative(context.getNativeContextId(), messages, chatTemplate);
+            
+            // Build formatted chat result
+            Map<String, Object> formattedChat = new HashMap<>();
+            formattedChat.put("type", "llama-chat");
+            formattedChat.put("prompt", result);
+            formattedChat.put("has_media", false);
+            formattedChat.put("media_paths", new String[0]);
 
-        callback.onResult(LlamaResult.success(formattedChat));
+            callback.onResult(LlamaResult.success(formattedChat));
+            
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to format chat: " + e.getMessage())));
+        }
     }
 
     public void completion(int contextId, JSObject params, LlamaCallback<Map<String, Object>> callback) {
@@ -385,48 +405,68 @@ public class LlamaCpp {
             return;
         }
 
-        // This would typically perform the completion using llama.cpp
-        // For now, return a basic completion result
-        Map<String, Object> completionResult = new HashMap<>();
-        completionResult.put("text", "Sample completion text");
-        completionResult.put("reasoning_content", "");
-        completionResult.put("tool_calls", new Object[0]);
-        completionResult.put("content", "Sample completion text");
-        completionResult.put("chat_format", 0);
-        completionResult.put("tokens_predicted", 0);
-        completionResult.put("tokens_evaluated", 0);
-        completionResult.put("truncated", false);
-        completionResult.put("stopped_eos", false);
-        completionResult.put("stopped_word", "");
-        completionResult.put("stopped_limit", 0);
-        completionResult.put("stopping_word", "");
-        completionResult.put("context_full", false);
-        completionResult.put("interrupted", false);
-        completionResult.put("tokens_cached", 0);
+        try {
+            // Extract parameters from JSObject
+            String prompt = params.getString("prompt", "");
+            int nPredict = params.getInteger("n_predict", 128);
+            float temperature = params.has("temp") ? (float) params.getDouble("temp") : 0.8f;
+            float topP = params.has("top_p") ? (float) params.getDouble("top_p") : 0.95f;
+            int topK = params.getInteger("top_k", 40);
+            float repeatPenalty = params.has("repeat_penalty") ? (float) params.getDouble("repeat_penalty") : 1.1f;
 
-        Map<String, Object> timings = new HashMap<>();
-        timings.put("prompt_n", 0);
-        timings.put("prompt_ms", 0);
-        timings.put("prompt_per_token_ms", 0);
-        timings.put("prompt_per_second", 0);
-        timings.put("predicted_n", 0);
-        timings.put("predicted_ms", 0);
-        timings.put("predicted_per_token_ms", 0);
-        timings.put("predicted_per_second", 0);
+            // Call native completion
+            String result = completionNative(context.getNativeContextId(), prompt);
+            
+            // Build completion result
+            Map<String, Object> completionResult = new HashMap<>();
+            completionResult.put("text", result);
+            completionResult.put("reasoning_content", "");
+            completionResult.put("tool_calls", new Object[0]);
+            completionResult.put("content", result);
+            completionResult.put("chat_format", 0);
+            completionResult.put("tokens_predicted", nPredict);
+            completionResult.put("tokens_evaluated", 0);
+            completionResult.put("truncated", false);
+            completionResult.put("stopped_eos", false);
+            completionResult.put("stopped_word", "");
+            completionResult.put("stopped_limit", 0);
+            completionResult.put("stopping_word", "");
+            completionResult.put("context_full", false);
+            completionResult.put("interrupted", false);
+            completionResult.put("tokens_cached", 0);
 
-        completionResult.put("timings", timings);
+            Map<String, Object> timings = new HashMap<>();
+            timings.put("prompt_n", 0);
+            timings.put("prompt_ms", 0);
+            timings.put("prompt_per_token_ms", 0);
+            timings.put("prompt_per_second", 0);
+            timings.put("predicted_n", nPredict);
+            timings.put("predicted_ms", 0);
+            timings.put("predicted_per_token_ms", 0);
+            timings.put("predicted_per_second", 0);
 
-        callback.onResult(LlamaResult.success(completionResult));
+            completionResult.put("timings", timings);
+
+            callback.onResult(LlamaResult.success(completionResult));
+            
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Completion failed: " + e.getMessage())));
+        }
     }
 
     public void stopCompletion(int contextId, LlamaCallback<Void> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
 
-        // This would typically stop any ongoing completion
-        callback.onResult(LlamaResult.success(null));
+        try {
+            stopCompletionNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to stop completion: " + e.getMessage())));
+        }
     }
 
     // MARK: - Session management
