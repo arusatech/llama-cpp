@@ -1,10 +1,10 @@
 {
   "name": "llama-cpp-capacitor",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
-  "types": "dist/esm/index.d.ts",
+  "types": "types/llama-cpp-capacitor.d.ts",
   "unpkg": "dist/plugin.js",
   "files": [
     "android/src/main/",
@@ -13,7 +13,8 @@
     "ios/Sources",
     "ios/Tests",
     "Package.swift",
-    "LlamaCpp.podspec"
+    "LlamaCpp.podspec",
+    "types/"
   ],
   "author": "Yakub Mohammad",
   "license": "MIT",

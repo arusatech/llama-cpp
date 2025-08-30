@@ -7,6 +7,7 @@ export default {
       name: 'capacitorLlamaCpp',
       globals: {
         '@capacitor/core': 'capacitorExports',
+        'tslib': 'tslib',
       },
       sourcemap: true,
       inlineDynamicImports: true,
@@ -18,5 +19,12 @@ export default {
       inlineDynamicImports: true,
     },
   ],
-  external: ['@capacitor/core'],
+  external: ['@capacitor/core', 'tslib'],
+  onwarn(warning, warn) {
+    // Suppress the "this has been rewritten to undefined" warning
+    if (warning.code === 'THIS_IS_UNDEFINED') {
+      return;
+    }
+    warn(warning);
+  },
 };
