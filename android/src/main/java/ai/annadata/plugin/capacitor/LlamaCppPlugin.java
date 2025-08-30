@@ -1,10 +1,13 @@
 package ai.annadata.plugin.capacitor;
 
 import com.getcapacitor.JSObject;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.Map;
+import org.json.JSONException;
 
 @CapacitorPlugin(name = "LlamaCpp")
 public class LlamaCppPlugin extends Plugin {
@@ -40,12 +43,27 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void modelInfo(PluginCall call) {
         String path = call.getString("path", "");
-        String[] skip = call.getArray("skip", String.class);
-        if (skip == null) skip = new String[0];
+        JSArray skipArray = call.getArray("skip");
+        String[] skip = new String[0];
+        if (skipArray != null) {
+            skip = new String[skipArray.length()];
+            for (int i = 0; i < skipArray.length(); i++) {
+                try {
+                    skip[i] = skipArray.getString(i);
+                } catch (JSONException e) {
+                    skip[i] = "";
+                }
+            }
+        }
 
         implementation.modelInfo(path, skip, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -59,7 +77,12 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.initContext(contextId, params, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -101,7 +124,12 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.getFormattedChat(contextId, messages, chatTemplate, params, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -115,7 +143,12 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.completion(contextId, params, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -140,11 +173,16 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void loadSession(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        String filepath = call.getString("filepath", "");
+        String path = call.getString("path", "");
 
-        implementation.loadSession(contextId, filepath, result -> {
+        implementation.loadSession(contextId, path, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -154,10 +192,10 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void saveSession(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        String filepath = call.getString("filepath", "");
+        String path = call.getString("path", "");
         int size = call.getInt("size", -1);
 
-        implementation.saveSession(contextId, filepath, size, result -> {
+        implementation.saveSession(contextId, path, size, result -> {
             if (result.isSuccess()) {
                 JSObject ret = new JSObject();
                 ret.put("tokensSaved", result.getData());
@@ -174,12 +212,27 @@ public class LlamaCppPlugin extends Plugin {
     public void tokenize(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
         String text = call.getString("text", "");
-        String[] imagePaths = call.getArray("imagePaths", String.class);
-        if (imagePaths == null) imagePaths = new String[0];
+        JSArray imagePathsArray = call.getArray("imagePaths");
+        String[] imagePaths = new String[0];
+        if (imagePathsArray != null) {
+            imagePaths = new String[imagePathsArray.length()];
+            for (int i = 0; i < imagePathsArray.length(); i++) {
+                try {
+                    imagePaths[i] = imagePathsArray.getString(i);
+                } catch (JSONException e) {
+                    imagePaths[i] = "";
+                }
+            }
+        }
 
         implementation.tokenize(contextId, text, imagePaths, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -189,8 +242,18 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void detokenize(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        Integer[] tokens = call.getArray("tokens", Integer.class);
-        if (tokens == null) tokens = new Integer[0];
+        JSArray tokensArray = call.getArray("tokens");
+        Integer[] tokens = new Integer[0];
+        if (tokensArray != null) {
+            tokens = new Integer[tokensArray.length()];
+            for (int i = 0; i < tokensArray.length(); i++) {
+                try {
+                    tokens[i] = tokensArray.getInt(i);
+                } catch (JSONException e) {
+                    tokens[i] = 0;
+                }
+            }
+        }
 
         implementation.detokenize(contextId, tokens, result -> {
             if (result.isSuccess()) {
@@ -213,7 +276,12 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.embedding(contextId, text, params, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject jsResult = new JSObject();
+                Map<String, Object> data = result.getData();
+                for (Map.Entry<String, Object> entry : data.entrySet()) {
+                    jsResult.put(entry.getKey(), entry.getValue());
+                }
+                call.resolve(jsResult);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -224,8 +292,18 @@ public class LlamaCppPlugin extends Plugin {
     public void rerank(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
         String query = call.getString("query", "");
-        String[] documents = call.getArray("documents", String.class);
-        if (documents == null) documents = new String[0];
+        JSArray documentsArray = call.getArray("documents");
+        String[] documents = new String[0];
+        if (documentsArray != null) {
+            documents = new String[documentsArray.length()];
+            for (int i = 0; i < documentsArray.length(); i++) {
+                try {
+                    documents[i] = documentsArray.getString(i);
+                } catch (JSONException e) {
+                    documents[i] = "";
+                }
+            }
+        }
         JSObject params = call.getObject("params");
 
         implementation.rerank(contextId, query, documents, params, result -> {
@@ -265,8 +343,15 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void applyLoraAdapters(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        JSObject[] loraAdapters = call.getArray("loraAdapters", JSObject.class);
-        if (loraAdapters == null) loraAdapters = new JSObject[0];
+        JSArray loraAdaptersArray = call.getArray("loraAdapters");
+        JSObject[] loraAdapters = new JSObject[0];
+        if (loraAdaptersArray != null) {
+            loraAdapters = new JSObject[loraAdaptersArray.length()];
+            for (int i = 0; i < loraAdaptersArray.length(); i++) {
+                // For now, create empty JSObjects since the exact method is unclear
+                loraAdapters[i] = new JSObject();
+            }
+        }
 
         implementation.applyLoraAdapters(contextId, loraAdapters, result -> {
             if (result.isSuccess()) {
@@ -346,7 +431,9 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.getMultimodalSupport(contextId, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject ret = new JSObject();
+                ret.put("support", result.getData());
+                call.resolve(ret);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -409,7 +496,9 @@ public class LlamaCppPlugin extends Plugin {
 
         implementation.getFormattedAudioCompletion(contextId, speakerJsonStr, textToSpeak, result -> {
             if (result.isSuccess()) {
-                call.resolve(result.getData());
+                JSObject ret = new JSObject();
+                ret.put("completion", result.getData());
+                call.resolve(ret);
             } else {
                 call.reject(result.getError().getMessage());
             }
@@ -435,8 +524,18 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void decodeAudioTokens(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        Integer[] tokens = call.getArray("tokens", Integer.class);
-        if (tokens == null) tokens = new Integer[0];
+        JSArray tokensArray = call.getArray("tokens");
+        Integer[] tokens = new Integer[0];
+        if (tokensArray != null) {
+            tokens = new Integer[tokensArray.length()];
+            for (int i = 0; i < tokensArray.length(); i++) {
+                try {
+                    tokens[i] = tokensArray.getInt(i);
+                } catch (JSONException e) {
+                    tokens[i] = 0;
+                }
+            }
+        }
 
         implementation.decodeAudioTokens(contextId, tokens, result -> {
             if (result.isSuccess()) {
