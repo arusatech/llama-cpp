@@ -5,7 +5,7 @@ import {
   toggleNativeLog,
   addNativeLogListener,
   BuildInfo 
-} from 'llama-cpp';
+} from './src';
 
 // Example usage of the llama-cpp CapacitorJS plugin
 

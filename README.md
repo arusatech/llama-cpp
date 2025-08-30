@@ -2,7 +2,7 @@
 
 [![Actions Status](https://github.com/arusatech/llama-cpp/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm](https://img.shields.io/npm/v/llama-cpp.svg)](https://www.npmjs.com/package/llama-cpp/)
+[![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
 
 A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
 
@@ -73,7 +73,7 @@ llama-cpp/
 ## 📦 Installation
 
 ```sh
-npm install llama-cpp
+npm install llama-cpp-capacitor
 ```
 
 ## 🔨 **Building the Native Library**

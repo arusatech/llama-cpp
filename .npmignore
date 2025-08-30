@@ -1,0 +1,59 @@
+# Development files
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Build artifacts
+node_modules/
+dist/
+build/
+*.log
+
+# Test files
+test/
+coverage/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+
+# Documentation (keep README and LICENSE)
+docs/
+*.md
+!README.md
+!LICENSE
+!CHANGELOG.md
+!CONTRIBUTING.md
+
+# Development scripts
+scripts/
+build-native.sh
+
+# Reference code
+ref_code/
+
+# IDE files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Example files
+example.ts
+example/
+
+# Integration testing
+INTEGRATION_TESTING_SUMMARY.md
+TESTING.md
+IMPLEMENTATION_SUMMARY.md
+
+# Development configs
+.prettierignore
+.eslintignore
+jest.config.js
+jest.integration.config.js
