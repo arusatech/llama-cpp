@@ -187,8 +187,12 @@ async function main() {
         });
 
         // Decode audio tokens to audio data
-        const audioData = await context.decodeAudioTokens(audioResult.audio_tokens);
-        console.log('Audio data length:', audioData.length);
+        if (audioResult.audio_tokens) {
+          const audioData = await context.decodeAudioTokens(audioResult.audio_tokens);
+          console.log('Audio data length:', audioData.length);
+        } else {
+          console.log('No audio tokens generated');
+        }
       }
 
       await context.releaseVocoder();
