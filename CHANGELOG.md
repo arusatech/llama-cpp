@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2025-08-30
+
+### Fixed
+- **Android Native Library Naming**: Fixed library naming to use `libllama-cpp.so` instead of architecture-specific names
+- **Java Library Loading**: Updated CMakeLists.txt to build libraries with generic names for Java compatibility
+- **System.loadLibrary() Compatibility**: Java code can now properly load the native library
+
+### Technical
+- Changed library target names from `llama-cpp-arm64-v8a` to `llama-cpp` in CMakeLists.txt
+- Updated all architecture-specific build configurations to use the same library name
+- This ensures `System.loadLibrary("llama-cpp")` can find the correct library file
+
+## [0.0.7] - 2025-08-30
+
+### Fixed
+- **Missing CPP Directory**: Added `cpp/` directory to npm package files to fix CMake build errors
+- **NPM Package Issue**: The cpp directory containing llama.cpp source files was not included in the published package
+- **CMake Build Failure**: Fixed "Cannot find source file" errors when installing plugin as npm dependency
+
+### Technical
+- Updated package.json files array to include cpp directory
+- This ensures all necessary source files are available when the plugin is installed as a dependency
+- CMake build system can now properly locate and compile llama.cpp source files
+
 ## [0.0.6] - 2025-08-30
 
 ### Fixed

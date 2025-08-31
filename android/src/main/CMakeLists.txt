@@ -105,41 +105,41 @@ function(build_library target_name arch cpu_flags)
     )
 endfunction()
 
-# Build for different architectures
+# Build for different architectures - use generic name for Java compatibility
 if (ANDROID_ABI STREQUAL "arm64-v8a")
-    build_library(llama-cpp-arm64-v8a "arm" "-march=armv8-a")
+    build_library(llama-cpp "arm" "-march=armv8-a")
 elseif (ANDROID_ABI STREQUAL "armeabi-v7a")
-    build_library(llama-cpp-armeabi-v7a "arm" "-march=armv7-a -mfpu=neon")
+    build_library(llama-cpp "arm" "-march=armv7-a -mfpu=neon")
 elseif (ANDROID_ABI STREQUAL "x86")
-    build_library(llama-cpp-x86 "x86" "-march=i686 -mtune=intel -mssse3 -mfpmath=sse -m32")
+    build_library(llama-cpp "x86" "-march=i686 -mtune=intel -mssse3 -mfpmath=sse -m32")
 elseif (ANDROID_ABI STREQUAL "x86_64")
-    build_library(llama-cpp-x86_64 "x86" "-march=x86-64 -msse4.2 -mpopcnt -m64 -mtune=intel")
+    build_library(llama-cpp "x86" "-march=x86-64 -msse4.2 -mpopcnt -m64 -mtune=intel")
 endif()
 
 # Set compile definitions for the target that was actually built
 if (ANDROID_ABI STREQUAL "arm64-v8a")
-    target_compile_definitions(llama-cpp-arm64-v8a PRIVATE
+    target_compile_definitions(llama-cpp PRIVATE
         -DNDEBUG
         -DO3
         -DLM_GGML_USE_CPU
         -DLM_GGML_CPU_GENERIC
     )
 elseif (ANDROID_ABI STREQUAL "armeabi-v7a")
-    target_compile_definitions(llama-cpp-armeabi-v7a PRIVATE
+    target_compile_definitions(llama-cpp PRIVATE
         -DNDEBUG
         -DO3
         -DLM_GGML_USE_CPU
         -DLM_GGML_CPU_GENERIC
     )
 elseif (ANDROID_ABI STREQUAL "x86")
-    target_compile_definitions(llama-cpp-x86 PRIVATE
+    target_compile_definitions(llama-cpp PRIVATE
         -DNDEBUG
         -DO3
         -DLM_GGML_USE_CPU
         -DLM_GGML_CPU_GENERIC
     )
 elseif (ANDROID_ABI STREQUAL "x86_64")
-    target_compile_definitions(llama-cpp-x86_64 PRIVATE
+    target_compile_definitions(llama-cpp PRIVATE
         -DNDEBUG
         -DO3
         -DLM_GGML_USE_CPU
