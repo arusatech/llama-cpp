@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.13] - 2025-08-30
+
+### Fixed
+- **Segmentation Fault Protection**: Added signal handlers to catch and handle segmentation faults during model loading
+- **Enhanced Model Compatibility**: Added GGUF version checking and ultra-minimal parameter fallback
+- **Memory Safety**: Disabled potentially problematic features (mmap, quantized matrix multiplication) in fallback mode
+- **Crash Prevention**: Implemented multiple layers of protection against model loading crashes
+
+### Technical
+- Added signal handlers for SIGSEGV to prevent app crashes during model loading
+- Enhanced model validation with GGUF version checking
+- Implemented ultra-minimal parameter set with disabled mmap and quantized operations
+- Added comprehensive error messages for model corruption and compatibility issues
+- Improved memory safety by disabling potentially problematic llama.cpp features
+
 ## [0.0.12] - 2025-08-30
 
 ### Fixed

@@ -2,7 +2,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "C:/annadata/prod/llama-cpp/android/src/jniLibs/arm64-v8a/libllama-cpp-arm64-v8a.so"
+			"path" : "C:/annadata/prod/llama-cpp/android/src/jniLibs/arm64-v8a/libllama-cpp.so"
 		}
 	],
 	"backtrace" : 2,
@@ -96,7 +96,7 @@
 					"define" : "O3"
 				},
 				{
-					"define" : "llama_cpp_arm64_v8a_EXPORTS"
+					"define" : "llama_cpp_EXPORTS"
 				}
 			],
 			"includes" : 
@@ -159,7 +159,7 @@
 					"define" : "O3"
 				},
 				{
-					"define" : "llama_cpp_arm64_v8a_EXPORTS"
+					"define" : "llama_cpp_EXPORTS"
 				}
 			],
 			"includes" : 
@@ -250,7 +250,7 @@
 			}
 		}
 	],
-	"id" : "llama-cpp-arm64-v8a::@6890427a1f51a3e7e1df",
+	"id" : "llama-cpp::@6890427a1f51a3e7e1df",
 	"link" : 
 	{
 		"commandFragments" : 
@@ -275,8 +275,8 @@
 			"path" : "C:/Users/arusa/AppData/Local/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
 		}
 	},
-	"name" : "llama-cpp-arm64-v8a",
-	"nameOnDisk" : "libllama-cpp-arm64-v8a.so",
+	"name" : "llama-cpp",
+	"nameOnDisk" : "libllama-cpp.so",
 	"paths" : 
 	{
 		"build" : ".",

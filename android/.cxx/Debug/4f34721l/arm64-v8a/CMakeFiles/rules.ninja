@@ -14,7 +14,7 @@
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__llama-cpp-arm64-v8a_Debug
+rule C_COMPILER__llama-cpp_Debug
   depfile = $DEP_FILE
   deps = gcc
   command = C:\Users\arusa\AppData\Local\Android\Sdk\ndk\27.0.12077973\toolchains\llvm\prebuilt\windows-x86_64\bin\clang.exe --target=aarch64-none-linux-android23 --sysroot=C:/Users/arusa/AppData/Local/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/windows-x86_64/sysroot $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out -c $in
@@ -24,7 +24,7 @@ rule C_COMPILER__llama-cpp-arm64-v8a_Debug
 #############################################
 # Rule for compiling CXX files.
 
-rule CXX_COMPILER__llama-cpp-arm64-v8a_Debug
+rule CXX_COMPILER__llama-cpp_Debug
   depfile = $DEP_FILE
   deps = gcc
   command = C:\Users\arusa\AppData\Local\Android\Sdk\ndk\27.0.12077973\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe --target=aarch64-none-linux-android23 --sysroot=C:/Users/arusa/AppData/Local/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/windows-x86_64/sysroot $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out -c $in
@@ -34,7 +34,7 @@ rule CXX_COMPILER__llama-cpp-arm64-v8a_Debug
 #############################################
 # Rule for linking CXX shared library.
 
-rule CXX_SHARED_LIBRARY_LINKER__llama-cpp-arm64-v8a_Debug
+rule CXX_SHARED_LIBRARY_LINKER__llama-cpp_Debug
   command = cmd.exe /C "$PRE_LINK && C:\Users\arusa\AppData\Local\Android\Sdk\ndk\27.0.12077973\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe --target=aarch64-none-linux-android23 --sysroot=C:/Users/arusa/AppData/Local/Android/Sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/windows-x86_64/sysroot -fPIC $LANGUAGE_COMPILE_FLAGS $ARCH_FLAGS $LINK_FLAGS -shared $SONAME_FLAG$SONAME -o $TARGET_FILE $in $LINK_PATH $LINK_LIBRARIES && $POST_BUILD"
   description = Linking CXX shared library $TARGET_FILE
   restat = $RESTAT

@@ -17,11 +17,11 @@
     "{LIST_OF_TARGETS_TO_BUILD}"
   ],
   "libraries": {
-    "llama-cpp-arm64-v8a::@6890427a1f51a3e7e1df": {
+    "llama-cpp::@6890427a1f51a3e7e1df": {
       "toolchain": "toolchain",
       "abi": "arm64-v8a",
-      "artifactName": "llama-cpp-arm64-v8a",
-      "output": "C:\\annadata\\prod\\llama-cpp\\android\\src\\jniLibs\\arm64-v8a\\libllama-cpp-arm64-v8a.so",
+      "artifactName": "llama-cpp",
+      "output": "C:\\annadata\\prod\\llama-cpp\\android\\src\\jniLibs\\arm64-v8a\\libllama-cpp.so",
       "runtimeFiles": []
     }
   },

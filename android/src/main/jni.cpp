@@ -4,6 +4,8 @@
 #include <cstring>
 #include <memory>
 #include <fstream> // Added for file existence and size checks
+#include <signal.h> // Added for signal handling
+#include <sys/signal.h> // Added for sigaction
 
 // Add missing symbol
 namespace rnllama {
@@ -199,6 +201,25 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
             throw_java_exception(env, "java/lang/RuntimeException", "Model file not found in any expected location");
             return -1;
         }
+        
+        // Additional model validation
+        LOGI("Performing additional model validation...");
+        std::ifstream validation_file(full_model_path, std::ios::binary);
+        if (validation_file.good()) {
+            // Read first 8 bytes to check GGUF version
+            char header[8];
+            if (validation_file.read(header, 8)) {
+                uint32_t version = *reinterpret_cast<uint32_t*>(header + 4);
+                LOGI("GGUF version: %u", version);
+                
+                // Check if version is reasonable (should be > 0 and < 1000)
+                if (version == 0 || version > 1000) {
+                    LOGE("Suspicious GGUF version: %u", version);
+                    LOGI("This might indicate a corrupted or incompatible model file");
+                }
+            }
+            validation_file.close();
+        }
 
         // Create new context
         auto context = std::make_unique<rnllama::llama_rn_context>();
@@ -264,9 +285,27 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
         LOGI("Model parameters: n_ctx=%d, n_batch=%d, n_gpu_layers=%d", 
              cparams.n_ctx, cparams.n_batch, cparams.n_gpu_layers);
         
-        // Try to load the model with error handling
+        // Try to load the model with error handling and signal protection
         bool load_success = false;
+        
+        // Set up signal handler to catch segmentation faults
+        struct sigaction old_action;
+        struct sigaction new_action;
+        new_action.sa_handler = [](int sig) {
+            LOGE("Segmentation fault caught during model loading");
+            // Restore default handler and re-raise signal
+            signal(sig, SIG_DFL);
+            raise(sig);
+        };
+        new_action.sa_flags = SA_RESETHAND;
+        sigemptyset(&new_action.sa_mask);
+        
+        if (sigaction(SIGSEGV, &new_action, &old_action) == 0) {
+            LOGI("Signal handler installed for segmentation fault protection");
+        }
+        
         try {
+            LOGI("Attempting to load model with standard parameters...");
             load_success = context->loadModel(cparams);
         } catch (const std::exception& e) {
             LOGE("Exception during model loading: %s", e.what());
@@ -276,77 +315,90 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
             load_success = false;
         }
         
+        // Restore original signal handler
+        sigaction(SIGSEGV, &old_action, nullptr);
+        
         if (!load_success) {
             LOGE("context->loadModel() returned false - model loading failed");
             
-            // Try with minimal parameters as fallback
-            LOGI("Trying with minimal parameters...");
-            common_params minimal_params;
-            minimal_params.model.path = full_model_path;
-            minimal_params.n_ctx = 512;
-            minimal_params.n_batch = 256;
-            minimal_params.n_gpu_layers = 0;
-            minimal_params.use_mmap = true;
-            minimal_params.use_mlock = false;
-            minimal_params.numa = LM_GGML_NUMA_STRATEGY_DISABLED;
-            minimal_params.ctx_shift = false;
-            minimal_params.chat_template = "";
-            minimal_params.embedding = false;
-            minimal_params.cont_batching = false;
-            minimal_params.parallel = false;
-            minimal_params.grammar = "";
-            minimal_params.grammar_penalty.clear();
-            minimal_params.antiprompt.clear();
-            minimal_params.lora_adapter.clear();
-            minimal_params.lora_base = "";
-            minimal_params.mul_mat_q = true;
-            minimal_params.f16_kv = true;
-            minimal_params.logits_all = false;
-            minimal_params.vocab_only = false;
-            minimal_params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
-            minimal_params.rope_scaling_factor = 0.0f;
-            minimal_params.rope_scaling_orig_ctx_len = 0;
-            minimal_params.yarn_ext_factor = -1.0f;
-            minimal_params.yarn_attn_factor = 1.0f;
-            minimal_params.yarn_beta_fast = 32.0f;
-            minimal_params.yarn_beta_slow = 1.0f;
-            minimal_params.yarn_orig_ctx = 0;
-            minimal_params.offload_kqv = true;
-            minimal_params.flash_attn = false;
-            minimal_params.flash_attn_kernel = false;
-            minimal_params.flash_attn_causal = true;
-            minimal_params.mmproj = "";
-            minimal_params.image = "";
-            minimal_params.export = "";
-            minimal_params.export_path = "";
-            minimal_params.seed = -1;
-            minimal_params.n_keep = 0;
-            minimal_params.n_discard = -1;
-            minimal_params.n_draft = 0;
-            minimal_params.n_chunks = -1;
-            minimal_params.n_parallel = 1;
-            minimal_params.n_sequences = 1;
-            minimal_params.p_accept = 0.5f;
-            minimal_params.p_split = 0.1f;
-            minimal_params.n_gqa = 8;
-            minimal_params.rms_norm_eps = 5e-6f;
-            minimal_params.model_alias = "unknown";
-            minimal_params.ubatch_size = 256;
-            minimal_params.ubatch_seq_len_max = 1;
+            // Try with ultra-minimal parameters as fallback
+            LOGI("Trying with ultra-minimal parameters...");
+            common_params ultra_minimal_params;
+            ultra_minimal_params.model.path = full_model_path;
+            ultra_minimal_params.n_ctx = 256;  // Very small context
+            ultra_minimal_params.n_batch = 128; // Very small batch
+            ultra_minimal_params.n_gpu_layers = 0;
+            ultra_minimal_params.use_mmap = false; // Disable mmap to avoid memory issues
+            ultra_minimal_params.use_mlock = false;
+            ultra_minimal_params.numa = LM_GGML_NUMA_STRATEGY_DISABLED;
+            ultra_minimal_params.ctx_shift = false;
+            ultra_minimal_params.chat_template = "";
+            ultra_minimal_params.embedding = false;
+            ultra_minimal_params.cont_batching = false;
+            ultra_minimal_params.parallel = false;
+            ultra_minimal_params.grammar = "";
+            ultra_minimal_params.grammar_penalty.clear();
+            ultra_minimal_params.antiprompt.clear();
+            ultra_minimal_params.lora_adapter.clear();
+            ultra_minimal_params.lora_base = "";
+            ultra_minimal_params.mul_mat_q = false; // Disable quantized matrix multiplication
+            ultra_minimal_params.f16_kv = false; // Disable f16 key-value cache
+            ultra_minimal_params.logits_all = false;
+            ultra_minimal_params.vocab_only = false;
+            ultra_minimal_params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
+            ultra_minimal_params.rope_scaling_factor = 0.0f;
+            ultra_minimal_params.rope_scaling_orig_ctx_len = 0;
+            ultra_minimal_params.yarn_ext_factor = -1.0f;
+            ultra_minimal_params.yarn_attn_factor = 1.0f;
+            ultra_minimal_params.yarn_beta_fast = 32.0f;
+            ultra_minimal_params.yarn_beta_slow = 1.0f;
+            ultra_minimal_params.yarn_orig_ctx = 0;
+            ultra_minimal_params.offload_kqv = false; // Disable offloading
+            ultra_minimal_params.flash_attn = false;
+            ultra_minimal_params.flash_attn_kernel = false;
+            ultra_minimal_params.flash_attn_causal = true;
+            ultra_minimal_params.mmproj = "";
+            ultra_minimal_params.image = "";
+            ultra_minimal_params.export = "";
+            ultra_minimal_params.export_path = "";
+            ultra_minimal_params.seed = -1;
+            ultra_minimal_params.n_keep = 0;
+            ultra_minimal_params.n_discard = -1;
+            ultra_minimal_params.n_draft = 0;
+            ultra_minimal_params.n_chunks = -1;
+            ultra_minimal_params.n_parallel = 1;
+            ultra_minimal_params.n_sequences = 1;
+            ultra_minimal_params.p_accept = 0.5f;
+            ultra_minimal_params.p_split = 0.1f;
+            ultra_minimal_params.n_gqa = 8;
+            ultra_minimal_params.rms_norm_eps = 5e-6f;
+            ultra_minimal_params.model_alias = "unknown";
+            ultra_minimal_params.ubatch_size = 128;
+            ultra_minimal_params.ubatch_seq_len_max = 1;
+            
+            // Set up signal handler again for ultra-minimal attempt
+            if (sigaction(SIGSEGV, &new_action, &old_action) == 0) {
+                LOGI("Signal handler reinstalled for ultra-minimal attempt");
+            }
             
             try {
-                load_success = context->loadModel(minimal_params);
+                load_success = context->loadModel(ultra_minimal_params);
             } catch (const std::exception& e) {
-                LOGE("Exception during minimal model loading: %s", e.what());
+                LOGE("Exception during ultra-minimal model loading: %s", e.what());
                 load_success = false;
             } catch (...) {
-                LOGE("Unknown exception during minimal model loading");
+                LOGE("Unknown exception during ultra-minimal model loading");
                 load_success = false;
             }
             
+            // Restore original signal handler
+            sigaction(SIGSEGV, &old_action, nullptr);
+            
             if (!load_success) {
-                LOGE("Model loading failed even with minimal parameters");
-                throw_java_exception(env, "java/lang/RuntimeException", "Failed to load model - possible model corruption or incompatibility");
+                LOGE("Model loading failed even with ultra-minimal parameters");
+                throw_java_exception(env, "java/lang/RuntimeException", 
+                    "Failed to load model - model appears to be corrupted or incompatible with this llama.cpp version. "
+                    "Try downloading a fresh copy of the model file.");
                 return -1;
             }
         }
