@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.12] - 2025-08-30
+
+### Fixed
+- **Enhanced File Path Resolution**: Added comprehensive path checking for model files across multiple Android directories
+- **Improved Model Validation**: Enhanced file validation with better error handling and logging
+- **Better Error Messages**: More descriptive error messages to help diagnose model loading issues
+- **Robust File Detection**: Added automatic detection of model files in common Android storage locations
+
+### Technical
+- Added multiple path checking for model files (app files, Documents, external storage)
+- Enhanced file validation with size and GGUF format checking
+- Improved logging to show all checked paths and file status
+- Better error handling with fallback to minimal parameters
+- Added comprehensive path resolution for Android file system
+
+## [0.0.11] - 2025-08-30
+
+### Fixed
+- **Model Validation**: Added comprehensive model file validation before loading
+- **Crash Prevention**: Enhanced error handling to prevent crashes during model loading
+- **GGUF Format Check**: Added validation to ensure the model file is a valid GGUF format
+- **Exception Handling**: Added try-catch blocks around model loading operations
+
+### Technical
+- Added file existence and size validation before model loading
+- Added GGUF magic number validation to ensure proper file format
+- Enhanced exception handling with detailed error messages
+- Added comprehensive logging for model validation steps
+- Improved error messages to help diagnose model compatibility issues
+
+## [0.0.10] - 2025-08-30
+
+### Fixed
+- **Model Loading Issues**: Enhanced model loading with better error handling and fallback parameters
+- **Common Parameters**: Added comprehensive common_params initialization for proper model loading
+- **Debug Logging**: Added detailed logging for model loading process to help diagnose issues
+
+### Technical
+- Added fallback to minimal parameters if standard parameters fail
+- Enhanced error logging to show model path and parameters being used
+- Added comprehensive common_params initialization with all required fields
+- Improved model loading reliability with multiple parameter sets
+
+## [0.0.9] - 2025-08-30
+
+### Fixed
+- **JNI Function Naming**: Fixed JNI function names to match Java native method declarations
+- **UnsatisfiedLinkError**: Resolved "No implementation found" errors for native methods
+- **Function Signature Mismatch**: Corrected JNI function signatures to match Java expectations
+
+### Technical
+- Renamed all JNI functions to include "Native" suffix to match Java declarations
+- Removed duplicate wrapper functions that were causing conflicts
+- Fixed function signatures (e.g., completionNative no longer expects params parameter)
+- All native methods now properly link between Java and C++
+
 ## [0.0.8] - 2025-08-30
 
 ### Fixed
