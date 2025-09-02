@@ -33,9 +33,9 @@ endif ()
 
 # Define public headers
 set(PUBLIC_HEADERS
-    ${SOURCE_DIR}/rn-llama.h
-    ${SOURCE_DIR}/rn-completion.h
-    ${SOURCE_DIR}/rn-tts.h
+    ${SOURCE_DIR}/cap-llama.h
+    ${SOURCE_DIR}/cap-completion.h
+    ${SOURCE_DIR}/cap-tts.h
     ${SOURCE_DIR}/llama.h
     ${SOURCE_DIR}/ggml.h
 )
@@ -96,9 +96,9 @@ add_library(llama-cpp SHARED
     ${SOURCE_DIR}/minja/chat-template.hpp
     ${SOURCE_DIR}/nlohmann/json.hpp
     ${SOURCE_DIR}/nlohmann/json_fwd.hpp
-    ${SOURCE_DIR}/rn-llama.cpp
-    ${SOURCE_DIR}/rn-completion.cpp
-    ${SOURCE_DIR}/rn-tts.cpp
+    ${SOURCE_DIR}/cap-llama.cpp
+    ${SOURCE_DIR}/cap-completion.cpp
+    ${SOURCE_DIR}/cap-tts.cpp
     ${SOURCE_FILES_ARCH}
 )
 

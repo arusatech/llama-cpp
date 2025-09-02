@@ -87,9 +87,9 @@ build_ios() {
     ln -sf Versions/Current/Resources Resources
     
     # Copy headers
-    cp ../../cpp/rn-llama.h Versions/A/Headers/
-    cp ../../cpp/rn-completion.h Versions/A/Headers/
-    cp ../../cpp/rn-tts.h Versions/A/Headers/
+    cp ../../cpp/cap-llama.h Versions/A/Headers/
+    cp ../../cpp/cap-completion.h Versions/A/Headers/
+    cp ../../cpp/cap-tts.h Versions/A/Headers/
     cp ../../cpp/llama.h Versions/A/Headers/
     cp ../../cpp/ggml.h Versions/A/Headers/
     

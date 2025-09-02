@@ -4,7 +4,7 @@
 #include <jni.h>
 #include <string>
 #include <vector>
-#include "rn-llama.h"
+#include "cap-llama.h"
 
 namespace jni_utils {
 
@@ -86,14 +86,14 @@ void set_static_field(JNIEnv* env, jclass clazz, jfieldID field, ...);
 // Get static field safely
 jobject get_static_field(JNIEnv* env, jclass clazz, jfieldID field);
 
-// Convert llama_rn_context to jobject
-jobject llama_context_to_jobject(JNIEnv* env, const rnllama::llama_rn_context* context);
+// Convert llama_cap_context to jobject
+jobject llama_context_to_jobject(JNIEnv* env, const capllama::llama_cap_context* context);
 
-// Convert jobject to llama_rn_context
-rnllama::llama_rn_context* jobject_to_llama_context(JNIEnv* env, jobject obj);
+// Convert jobject to llama_cap_context
+capllama::llama_cap_context* jobject_to_llama_context(JNIEnv* env, jobject obj);
 
 // Convert completion result to jobject
-jobject completion_result_to_jobject(JNIEnv* env, const rnllama::completion_token_output& result);
+jobject completion_result_to_jobject(JNIEnv* env, const capllama::completion_token_output& result);
 
 // Convert jobject to completion parameters
 common_params jobject_to_completion_params(JNIEnv* env, jobject obj);
@@ -105,7 +105,7 @@ jobject chat_params_to_jobject(JNIEnv* env, const common_chat_params& params);
 common_chat_params jobject_to_chat_params(JNIEnv* env, jobject obj);
 
 // Convert tokenize result to jobject
-jobject tokenize_result_to_jobject(JNIEnv* env, const rnllama::llama_rn_tokenize_result& result);
+jobject tokenize_result_to_jobject(JNIEnv* env, const capllama::llama_cap_tokenize_result& result);
 
 // Convert embedding result to jobject
 jobject embedding_result_to_jobject(JNIEnv* env, const std::vector<float>& embedding);

@@ -1,5 +1,5 @@
-#ifndef RN_COMPLETION_H
-#define RN_COMPLETION_H
+#ifndef CAP_COMPLETION_H
+#define CAP_COMPLETION_H
 
 #include "common.h"
 #include "llama.h"
@@ -9,7 +9,7 @@
 
 using json = nlohmann::ordered_json;
 
-namespace rnllama {
+namespace capllama {
 
 // Utility functions
 static inline void llama_batch_clear(llama_batch *batch) {
@@ -17,9 +17,9 @@ static inline void llama_batch_clear(llama_batch *batch) {
 }
 
 // Forward declarations
-struct llama_rn_context;
+struct llama_cap_context;
 
-// Types defined in rn-llama.h (needed here for compilation)
+// Types defined in cap-llama.h (needed here for compilation)
 enum stop_type
 {
     STOP_FULL,
@@ -47,9 +47,9 @@ struct completion_partial_output
 };
 
 // Completion context class
-struct llama_rn_context_completion {
+struct llama_cap_context_completion {
     // Reference to parent context
-    llama_rn_context* parent_ctx;
+    llama_cap_context* parent_ctx;
 
     // Completion state fields
     bool is_predicting = false;
@@ -79,10 +79,10 @@ struct llama_rn_context_completion {
     common_sampler *ctx_sampling = nullptr;
 
     // Constructor
-    llama_rn_context_completion(llama_rn_context* parent);
+    llama_cap_context_completion(llama_cap_context* parent);
 
     // Destructor
-    ~llama_rn_context_completion();
+    ~llama_cap_context_completion();
 
     // Completion processing methods
     void rewind();
@@ -111,6 +111,6 @@ struct llama_rn_context_completion {
     );
 };
 
-} // namespace rnllama
+} // namespace capllama
 
-#endif /* RN_COMPLETION_H */
+#endif /* CAP_COMPLETION_H */

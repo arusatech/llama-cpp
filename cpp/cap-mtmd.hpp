@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rn-llama.h"
+#include "cap-llama.h"
 #include "tools/mtmd/mtmd.h"
 #include "tools/mtmd/mtmd-helper.h"
 #include "tools/mtmd/clip.h"
@@ -8,17 +8,17 @@
 #include <vector>
 #include <cstdint>
 
-namespace rnllama {
+namespace capllama {
 
 // MTMD context structure
-struct llama_rn_context_mtmd {
+struct llama_cap_context_mtmd {
     mtmd_context *mtmd_ctx = nullptr;
 
     // State fields
     std::vector<std::string> bitmap_past_hashes;
 
     // Constructor - Initialize multimodal
-    llama_rn_context_mtmd(
+    llama_cap_context_mtmd(
         const std::string &mmproj_path,
         bool use_gpu,
         llama_model *model,
@@ -29,7 +29,7 @@ struct llama_rn_context_mtmd {
     );
 
     // Destructor - Release multimodal resources
-    ~llama_rn_context_mtmd();
+    ~llama_cap_context_mtmd();
 
     // Process media
     void processMedia(
@@ -149,11 +149,11 @@ struct mtmd_tokenize_result {
     mtmd_input_chunks* chunks = nullptr;
 };
 
-// Forward declaration for llama_rn_context
-struct llama_rn_context;
+// Forward declaration for llama_cap_context
+struct llama_cap_context;
 
 // Tokenize text with media function
-inline mtmd_tokenize_result tokenizeWithMedia(llama_rn_context_mtmd *mtmd_wrapper, const std::string &prompt, const std::vector<std::string> &media_paths) {
+inline mtmd_tokenize_result tokenizeWithMedia(llama_cap_context_mtmd *mtmd_wrapper, const std::string &prompt, const std::vector<std::string> &media_paths) {
     mtmd_tokenize_result result;
     mtmd::bitmaps bitmaps;
 
@@ -369,7 +369,7 @@ inline mtmd_tokenize_result tokenizeWithMedia(llama_rn_context_mtmd *mtmd_wrappe
     return result;
 }
 
-inline void llama_rn_context_mtmd::processMedia(
+inline void llama_cap_context_mtmd::processMedia(
     llama_context *ctx,
     const std::string &prompt,
     const std::vector<std::string> &media_paths,
@@ -524,7 +524,7 @@ inline void llama_rn_context_mtmd::processMedia(
     mtmd_input_chunks_free(chunks);
 }
 
-inline llama_rn_context_mtmd::llama_rn_context_mtmd(
+inline llama_cap_context_mtmd::llama_cap_context_mtmd(
     const std::string &mmproj_path,
     bool use_gpu,
     llama_model *model,
@@ -580,23 +580,23 @@ inline llama_rn_context_mtmd::llama_rn_context_mtmd(
     LOG_INFO("Context shifting disabled for multimodal support");
 }
 
-inline llama_rn_context_mtmd::~llama_rn_context_mtmd() {
+inline llama_cap_context_mtmd::~llama_cap_context_mtmd() {
     if (mtmd_ctx != nullptr) {
         mtmd_free(mtmd_ctx);
         mtmd_ctx = nullptr;
     }
 }
 
-inline bool llama_rn_context_mtmd::isEnabled(bool has_multimodal) const {
+inline bool llama_cap_context_mtmd::isEnabled(bool has_multimodal) const {
     return has_multimodal && this != nullptr;
 }
 
-inline bool llama_rn_context_mtmd::supportVision() const {
+inline bool llama_cap_context_mtmd::supportVision() const {
     return mtmd_ctx != nullptr && mtmd_support_vision(mtmd_ctx);
 }
 
-inline bool llama_rn_context_mtmd::supportAudio() const {
+inline bool llama_cap_context_mtmd::supportAudio() const {
     return mtmd_ctx != nullptr && mtmd_support_audio(mtmd_ctx);
 }
 
-} // namespace rnllama
+} // namespace capllama

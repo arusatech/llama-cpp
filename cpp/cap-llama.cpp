@@ -1,14 +1,14 @@
-#include "rn-llama.h"
-#include "rn-tts.h"
-#include "rn-mtmd.hpp"
-#include "rn-completion.h"
+#include "cap-llama.h"
+#include "cap-tts.h"
+#include "cap-mtmd.hpp"
+#include "cap-completion.h"
 
 // Include multimodal support
 #include "tools/mtmd/mtmd.h"
 #include "tools/mtmd/mtmd-helper.h"
 #include "tools/mtmd/clip.h"
 
-namespace rnllama {
+namespace capllama {
 
 static const std::vector<lm_ggml_type> kv_cache_types = {
     LM_GGML_TYPE_F32,
@@ -122,7 +122,7 @@ std::string tokens_to_str(llama_context *ctx, const std::vector<llama_token>::co
 }
 
 
-llama_rn_context::~llama_rn_context() {
+llama_cap_context::~llama_cap_context() {
     if (completion != nullptr) {
         delete completion;
         completion = nullptr;
@@ -132,7 +132,7 @@ llama_rn_context::~llama_rn_context() {
     releaseVocoder();
 }
 
-bool llama_rn_context::loadModel(common_params &params_)
+bool llama_cap_context::loadModel(common_params &params_)
 {
     params = params_;
     llama_init = common_init_from_params(params);
@@ -150,7 +150,7 @@ bool llama_rn_context::loadModel(common_params &params_)
     if (completion != nullptr) {
         delete completion;
     }
-    completion = new llama_rn_context_completion(this);
+    completion = new llama_cap_context_completion(this);
 
     // Initialize context shift flag
     LOG_INFO("ctx_shift: %s", params.ctx_shift ? "enabled" : "disabled");
@@ -162,7 +162,7 @@ bool llama_rn_context::loadModel(common_params &params_)
 }
 
 
-bool llama_rn_context::validateModelChatTemplate(bool use_jinja, const char *name) const {
+bool llama_cap_context::validateModelChatTemplate(bool use_jinja, const char *name) const {
     const char * tmpl = llama_model_chat_template(model, name);
     if (tmpl == nullptr) {
       return false;
@@ -170,7 +170,7 @@ bool llama_rn_context::validateModelChatTemplate(bool use_jinja, const char *nam
     return common_chat_verify_template(tmpl, use_jinja);
 }
 
-common_chat_params llama_rn_context::getFormattedChatWithJinja(
+common_chat_params llama_cap_context::getFormattedChatWithJinja(
         const std::string& messages,
         const std::string& chat_template,
         const std::string& json_schema,
@@ -222,7 +222,7 @@ common_chat_params llama_rn_context::getFormattedChatWithJinja(
     }
 }
 
-std::string llama_rn_context::getFormattedChat(
+std::string llama_cap_context::getFormattedChat(
   const std::string &messages,
   const std::string &chat_template
 ) const {
@@ -239,14 +239,14 @@ std::string llama_rn_context::getFormattedChat(
     }
 }
 
-llama_rn_tokenize_result llama_rn_context::tokenize(const std::string &text, const std::vector<std::string> &media_paths) {
+llama_cap_tokenize_result llama_cap_context::tokenize(const std::string &text, const std::vector<std::string> &media_paths) {
   if (media_paths.size() > 0) {
       if (!isMultimodalEnabled()) {
           throw std::runtime_error("Multimodal is not enabled but media paths are provided");
       }
       auto result = tokenizeWithMedia(mtmd_wrapper, text, media_paths);
       mtmd_input_chunks_free(result.chunks);
-      llama_rn_tokenize_result tokenize_result = {
+      llama_cap_tokenize_result tokenize_result = {
           .tokens = result.tokens,
           .has_media = true,
           .bitmap_hashes = result.bitmap_hashes,
@@ -257,7 +257,7 @@ llama_rn_tokenize_result llama_rn_context::tokenize(const std::string &text, con
   }
   std::vector<llama_token> text_tokens;
   text_tokens = common_tokenize(ctx, text, false);
-  llama_rn_tokenize_result tokenize_result = {
+  llama_cap_tokenize_result tokenize_result = {
       .tokens = text_tokens,
       .has_media = false,
       .bitmap_hashes = {},
@@ -267,7 +267,7 @@ llama_rn_tokenize_result llama_rn_context::tokenize(const std::string &text, con
   return tokenize_result;
 }
 
-int llama_rn_context::applyLoraAdapters(std::vector<common_adapter_lora_info> lora) {
+int llama_cap_context::applyLoraAdapters(std::vector<common_adapter_lora_info> lora) {
     for (auto &la : lora) {
         la.ptr = llama_adapter_lora_init(model, la.path.c_str());
         if (la.ptr == nullptr) {
@@ -280,18 +280,18 @@ int llama_rn_context::applyLoraAdapters(std::vector<common_adapter_lora_info> lo
     return 0;
 }
 
-void llama_rn_context::removeLoraAdapters() {
+void llama_cap_context::removeLoraAdapters() {
     this->lora.clear();
     common_set_adapter_lora(ctx, this->lora); // apply empty list
 }
 
-std::vector<common_adapter_lora_info> llama_rn_context::getLoadedLoraAdapters() {
+std::vector<common_adapter_lora_info> llama_cap_context::getLoadedLoraAdapters() {
     return this->lora;
 }
 
-bool llama_rn_context::initMultimodal(const std::string &mmproj_path, bool use_gpu) {
+bool llama_cap_context::initMultimodal(const std::string &mmproj_path, bool use_gpu) {
     try {
-        mtmd_wrapper = new llama_rn_context_mtmd(mmproj_path, use_gpu, model, ctx, params, has_multimodal, params);
+        mtmd_wrapper = new llama_cap_context_mtmd(mmproj_path, use_gpu, model, ctx, params, has_multimodal, params);
         return true;
     } catch (const std::exception& e) {
         LOG_ERROR("[DEBUG] Failed to initialize multimodal: %s", e.what());
@@ -299,19 +299,19 @@ bool llama_rn_context::initMultimodal(const std::string &mmproj_path, bool use_g
     }
 }
 
-bool llama_rn_context::isMultimodalEnabled() const {
+bool llama_cap_context::isMultimodalEnabled() const {
     return mtmd_wrapper != nullptr && mtmd_wrapper->isEnabled(has_multimodal);
 }
 
-bool llama_rn_context::isMultimodalSupportVision() const {
+bool llama_cap_context::isMultimodalSupportVision() const {
     return isMultimodalEnabled() && mtmd_wrapper->supportVision();
 }
 
-bool llama_rn_context::isMultimodalSupportAudio() const {
+bool llama_cap_context::isMultimodalSupportAudio() const {
     return isMultimodalEnabled() && mtmd_wrapper->supportAudio();
 }
 
-void llama_rn_context::releaseMultimodal() {
+void llama_cap_context::releaseMultimodal() {
     if (mtmd_wrapper != nullptr) {
         delete mtmd_wrapper;
         mtmd_wrapper = nullptr;
@@ -319,9 +319,9 @@ void llama_rn_context::releaseMultimodal() {
     }
 }
 
-bool llama_rn_context::initVocoder(const std::string &vocoder_model_path, int batch_size) {
+bool llama_cap_context::initVocoder(const std::string &vocoder_model_path, int batch_size) {
     try {
-        tts_wrapper = new llama_rn_context_tts(vocoder_model_path, batch_size);
+        tts_wrapper = new llama_cap_context_tts(vocoder_model_path, batch_size);
         has_vocoder = true;
         return true;
     } catch (const std::exception& e) {
@@ -330,11 +330,11 @@ bool llama_rn_context::initVocoder(const std::string &vocoder_model_path, int ba
     }
 }
 
-bool llama_rn_context::isVocoderEnabled() const {
+bool llama_cap_context::isVocoderEnabled() const {
     return has_vocoder && tts_wrapper != nullptr;
 }
 
-void llama_rn_context::releaseVocoder() {
+void llama_cap_context::releaseVocoder() {
     if (tts_wrapper != nullptr) {
         delete tts_wrapper;
         tts_wrapper = nullptr;

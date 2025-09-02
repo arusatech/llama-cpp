@@ -1,5 +1,5 @@
-#ifndef RNLLAMA_H
-#define RNLLAMA_H
+#ifndef CAPLLAMA_H
+#define CAPLLAMA_H
 
 #include <sstream>
 #include <iostream>
@@ -14,14 +14,14 @@
 #include "llama-impl.h"
 #include "sampling.h"
 #include "nlohmann/json.hpp"
-#include "rn-tts.h"
+#include "cap-tts.h"
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
 
 using json = nlohmann::ordered_json;
 
-namespace rnllama {
+namespace capllama {
 
 std::string tokens_to_output_formatted_string(const llama_context *ctx, const llama_token token);
 
@@ -29,17 +29,17 @@ std::string tokens_to_str(llama_context *ctx, const std::vector<llama_token>::co
 
 lm_ggml_type kv_cache_type_from_str(const std::string & s);
 
-// Forward declarations - actual definitions are in rn-completion.h
+// Forward declarations - actual definitions are in cap-completion.h
 // Note: enum forward declarations not allowed in C++, using include in implementation file
 struct completion_token_output;
 struct completion_partial_output;
-struct llama_rn_context_mtmd;
+struct llama_cap_context_mtmd;
 
-struct llama_rn_context_tts;
+struct llama_cap_context_tts;
 
-struct llama_rn_context_completion;
+struct llama_cap_context_completion;
 
-struct llama_rn_tokenize_result {
+struct llama_cap_tokenize_result {
   std::vector<llama_token> tokens;
   bool has_media = false;
   std::vector<std::string> bitmap_hashes;
@@ -48,7 +48,7 @@ struct llama_rn_tokenize_result {
 };
 
 // Main context class
-struct llama_rn_context {
+struct llama_cap_context {
     // Model state fields
     llama_model *model = nullptr;
     float loading_progress = 0;
@@ -60,9 +60,9 @@ struct llama_rn_context {
     int n_ctx;
 
     // Completion context
-    llama_rn_context_completion *completion = nullptr;
+    llama_cap_context_completion *completion = nullptr;
 
-    ~llama_rn_context();
+    ~llama_cap_context();
 
     bool loadModel(common_params &params_);
 
@@ -84,7 +84,7 @@ struct llama_rn_context {
       const std::string &messages,
       const std::string &chat_template
     ) const;
-    llama_rn_tokenize_result tokenize(const std::string &text, const std::vector<std::string> &media_paths);
+    llama_cap_tokenize_result tokenize(const std::string &text, const std::vector<std::string> &media_paths);
 
     // Lora methods
     std::vector<common_adapter_lora_info> lora;
@@ -93,7 +93,7 @@ struct llama_rn_context {
     std::vector<common_adapter_lora_info> getLoadedLoraAdapters();
 
     // Multimodal fields and methods
-    llama_rn_context_mtmd *mtmd_wrapper = nullptr;
+    llama_cap_context_mtmd *mtmd_wrapper = nullptr;
     bool has_multimodal = false;
     bool initMultimodal(const std::string &mmproj_path, bool use_gpu);
     bool isMultimodalEnabled() const;
@@ -102,7 +102,7 @@ struct llama_rn_context {
     void releaseMultimodal();
 
     // TTS fields and methods (delegated to TTS context)
-    llama_rn_context_tts *tts_wrapper = nullptr;
+    llama_cap_context_tts *tts_wrapper = nullptr;
     bool has_vocoder = false;
     bool initVocoder(const std::string &vocoder_model_path, int batch_size = -1);
     bool isVocoderEnabled() const;
@@ -125,15 +125,15 @@ inline void llama_batch_add(llama_batch *batch, llama_token id, llama_pos pos, s
 void log(const char *level, const char *function, int line, const char *format, ...);
 
 // Logging macros
-extern bool rnllama_verbose;
+extern bool capllama_verbose;
 
-#if RNLLAMA_VERBOSE != 1
+#if CAPLLAMA_VERBOSE != 1
 #define LOG_VERBOSE(MSG, ...)
 #else
 #define LOG_VERBOSE(MSG, ...)                                       \
     do                                                              \
     {                                                               \
-        if (rnllama_verbose)                                        \
+        if (capllama_verbose)                                        \
         {                                                           \
             log("VERBOSE", __func__, __LINE__, MSG, ##__VA_ARGS__); \
         }                                                           \
@@ -144,6 +144,6 @@ extern bool rnllama_verbose;
 #define LOG_WARNING(MSG, ...) log("WARNING", __func__, __LINE__, MSG, ##__VA_ARGS__)
 #define LOG_INFO(MSG, ...) log("INFO", __func__, __LINE__, MSG, ##__VA_ARGS__)
 
-} // namespace rnllama
+} // namespace capllama
 
-#endif /* RNLLAMA_H */
+#endif /* CAPLLAMA_H */

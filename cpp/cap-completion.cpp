@@ -1,14 +1,14 @@
-#include "rn-completion.h"
-#include "rn-llama.h"
-#include "rn-tts.h"
-#include "rn-mtmd.hpp"
+#include "cap-completion.h"
+#include "cap-llama.h"
+#include "cap-tts.h"
+#include "cap-mtmd.hpp"
 
 // Include multimodal support
 #include "tools/mtmd/mtmd.h"
 #include "tools/mtmd/mtmd-helper.h"
 #include "tools/mtmd/clip.h"
 
-namespace rnllama {
+namespace capllama {
 
 static bool ends_with(const std::string &str, const std::string &suffix)
 {
@@ -67,19 +67,19 @@ static std::vector<llama_token> format_rerank(const llama_vocab * vocab, const s
 }
 
 // Constructor
-llama_rn_context_completion::llama_rn_context_completion(llama_rn_context* parent)
+llama_cap_context_completion::llama_cap_context_completion(llama_cap_context* parent)
     : parent_ctx(parent) {
 }
 
 // Destructor
-llama_rn_context_completion::~llama_rn_context_completion() {
+llama_cap_context_completion::~llama_cap_context_completion() {
     if (ctx_sampling != nullptr) {
         common_sampler_free(ctx_sampling);
         ctx_sampling = nullptr;
     }
 }
 
-void llama_rn_context_completion::rewind() {
+void llama_cap_context_completion::rewind() {
     is_interrupted = false;
     parent_ctx->params.antiprompt.clear();
     parent_ctx->params.sampling.grammar.clear();
@@ -105,7 +105,7 @@ void llama_rn_context_completion::rewind() {
     }
 }
 
-bool llama_rn_context_completion::initSampling() {
+bool llama_cap_context_completion::initSampling() {
     if (ctx_sampling != nullptr) {
         common_sampler_free(ctx_sampling);
     }
@@ -113,7 +113,7 @@ bool llama_rn_context_completion::initSampling() {
     return ctx_sampling != nullptr;
 }
 
-void llama_rn_context_completion::truncatePrompt(std::vector<llama_token> &prompt_tokens) {
+void llama_cap_context_completion::truncatePrompt(std::vector<llama_token> &prompt_tokens) {
     const int n_left = parent_ctx->n_ctx - parent_ctx->params.n_keep;
     const int n_block_size = n_left / 2;
     const int erased_blocks = (prompt_tokens.size() - parent_ctx->params.n_keep - n_block_size) / n_block_size;
@@ -135,7 +135,7 @@ void llama_rn_context_completion::truncatePrompt(std::vector<llama_token> &promp
     prompt_tokens = new_tokens;
 }
 
-void llama_rn_context_completion::loadPrompt(const std::vector<std::string> &media_paths) {
+void llama_cap_context_completion::loadPrompt(const std::vector<std::string> &media_paths) {
     bool has_media = !media_paths.empty();
 
     if (!has_media) {
@@ -203,11 +203,11 @@ void llama_rn_context_completion::loadPrompt(const std::vector<std::string> &med
              n_past, embd.size(), num_prompt_tokens, has_media ? 1 : 0);
 }
 
-void llama_rn_context_completion::beginCompletion() {
+void llama_cap_context_completion::beginCompletion() {
     beginCompletion(COMMON_CHAT_FORMAT_CONTENT_ONLY, COMMON_REASONING_FORMAT_NONE, false);
 }
 
-void llama_rn_context_completion::beginCompletion(int chat_format, common_reasoning_format reasoning_format, bool thinking_forced_open) {
+void llama_cap_context_completion::beginCompletion(int chat_format, common_reasoning_format reasoning_format, bool thinking_forced_open) {
     // number of tokens to keep when resetting context
     n_remain = parent_ctx->params.n_predict;
     llama_perf_context_reset(parent_ctx->ctx);
@@ -218,11 +218,11 @@ void llama_rn_context_completion::beginCompletion(int chat_format, common_reason
     current_thinking_forced_open = thinking_forced_open;
 }
 
-void llama_rn_context_completion::endCompletion() {
+void llama_cap_context_completion::endCompletion() {
     is_predicting = false;
 }
 
-completion_token_output llama_rn_context_completion::nextToken()
+completion_token_output llama_cap_context_completion::nextToken()
 {
     completion_token_output result;
     result.tok = -1;
@@ -344,7 +344,7 @@ completion_token_output llama_rn_context_completion::nextToken()
     return result;
 }
 
-size_t llama_rn_context_completion::findStoppingStrings(const std::string &text, const size_t last_token_size,
+size_t llama_cap_context_completion::findStoppingStrings(const std::string &text, const size_t last_token_size,
                             const stop_type type)
 {
     size_t stop_pos = std::string::npos;
@@ -376,7 +376,7 @@ size_t llama_rn_context_completion::findStoppingStrings(const std::string &text,
     return stop_pos;
 }
 
-completion_token_output llama_rn_context_completion::doCompletion()
+completion_token_output llama_cap_context_completion::doCompletion()
 {
     completion_token_output token_with_probs = nextToken();
 
@@ -444,7 +444,7 @@ completion_token_output llama_rn_context_completion::doCompletion()
     return token_with_probs;
 }
 
-completion_partial_output llama_rn_context_completion::getPartialOutput(const std::string &token_text) {
+completion_partial_output llama_cap_context_completion::getPartialOutput(const std::string &token_text) {
     common_chat_syntax syntax;
     syntax.format = static_cast<common_chat_format>(current_chat_format);
     syntax.reasoning_format = current_reasoning_format;
@@ -463,7 +463,7 @@ completion_partial_output llama_rn_context_completion::getPartialOutput(const st
     return result;
 }
 
-std::vector<float> llama_rn_context_completion::getEmbedding(common_params &embd_params)
+std::vector<float> llama_cap_context_completion::getEmbedding(common_params &embd_params)
 {
     static const int n_embd = llama_model_n_embd(llama_get_model(parent_ctx->ctx));
     if (!embd_params.embedding)
@@ -489,7 +489,7 @@ std::vector<float> llama_rn_context_completion::getEmbedding(common_params &embd
     return out;
 }
 
-std::vector<float> llama_rn_context_completion::rerank(const std::string &query, const std::vector<std::string> &documents)
+std::vector<float> llama_cap_context_completion::rerank(const std::string &query, const std::vector<std::string> &documents)
 {
     std::vector<float> scores;
 
@@ -548,7 +548,7 @@ std::vector<float> llama_rn_context_completion::rerank(const std::string &query,
     return scores;
 }
 
-std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr)
+std::string llama_cap_context_completion::bench(int pp, int tg, int pl, int nr)
 {
     if (is_predicting) {
         LOG_ERROR("cannot benchmark while predicting", "");
@@ -563,7 +563,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr)
     double pp_std = 0;
     double tg_std = 0;
 
-    // TODO: move batch into llama_rn_context (related https://github.com/mybigday/llama.rn/issues/30)
+    // TODO: move batch into llama_cap_context (related https://github.com/mybigday/llama.rn/issues/30)
     llama_batch batch = llama_batch_init(
         std::min(pp, parent_ctx->params.n_ubatch), // max n_tokens is limited by n_ubatch
         0,                         // No embeddings
@@ -656,7 +656,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr)
         std::string("]");
 }
 
-void llama_rn_context_completion::processMedia(
+void llama_cap_context_completion::processMedia(
     const std::string &prompt,
     const std::vector<std::string> &media_paths
 ) {
@@ -678,4 +678,4 @@ void llama_rn_context_completion::processMedia(
     );
 }
 
-} // namespace rnllama
+} // namespace capllama

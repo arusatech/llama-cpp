@@ -1,5 +1,5 @@
-#include "rn-tts.h"
-#include "rn-llama.h"
+#include "cap-tts.h"
+#include "cap-llama.h"
 #include "anyascii.h"
 #include "common.h"
 #include <regex>
@@ -11,7 +11,7 @@
 #include <thread>
 #include <cmath>
 
-namespace rnllama {
+namespace capllama {
 
 // Constants definitions
 const std::string default_audio_text = "<|text_start|>the<|text_sep|>overall<|text_sep|>package<|text_sep|>from<|text_sep|>just<|text_sep|>two<|text_sep|>people<|text_sep|>is<|text_sep|>pretty<|text_sep|>remarkable<|text_sep|>sure<|text_sep|>i<|text_sep|>have<|text_sep|>some<|text_sep|>critiques<|text_sep|>about<|text_sep|>some<|text_sep|>of<|text_sep|>the<|text_sep|>gameplay<|text_sep|>aspects<|text_sep|>but<|text_sep|>its<|text_sep|>still<|text_sep|>really<|text_sep|>enjoyable<|text_sep|>and<|text_sep|>it<|text_sep|>looks<|text_sep|>lovely<|text_sep|>";
@@ -269,7 +269,7 @@ std::string audio_data_from_speaker(json speaker, const tts_type type) {
 }
 
 // Constructor and destructor implementations
-llama_rn_context_tts::llama_rn_context_tts(const std::string &vocoder_model_path, int batch_size) {
+llama_cap_context_tts::llama_cap_context_tts(const std::string &vocoder_model_path, int batch_size) {
   common_params vocoder_params;
   vocoder_params.model.path = vocoder_model_path;
   vocoder_params.embedding = true;
@@ -291,14 +291,14 @@ llama_rn_context_tts::llama_rn_context_tts(const std::string &vocoder_model_path
   type = UNKNOWN; // Will be determined when used
 }
 
-llama_rn_context_tts::~llama_rn_context_tts() {
+llama_cap_context_tts::~llama_cap_context_tts() {
   // init_result will handle cleanup automatically when it goes out of scope
   model = nullptr;
   ctx = nullptr;
   type = UNKNOWN;
 }
 
-void llama_rn_context_tts::setGuideTokens(const std::vector<llama_token> &tokens) {
+void llama_cap_context_tts::setGuideTokens(const std::vector<llama_token> &tokens) {
     guide_tokens = tokens;
 }
 
@@ -456,8 +456,8 @@ std::vector<float> embd_to_audio(
     return audio;
 }
 
-// Forward declarations from rn-llama.h
-extern bool rnllama_verbose;
+// Forward declarations from cap-llama.h
+extern bool capllama_verbose;
 void log(const char *level, const char *function, int line, const char *format, ...);
 
 #define LOG_ERROR(MSG, ...) log("ERROR", __func__, __LINE__, MSG, ##__VA_ARGS__)
@@ -465,7 +465,7 @@ void log(const char *level, const char *function, int line, const char *format, 
 #define LOG_INFO(MSG, ...) log("INFO", __func__, __LINE__, MSG, ##__VA_ARGS__)
 
 // TTS member functions
-tts_type llama_rn_context_tts::getTTSType(llama_rn_context* main_ctx, json speaker) {
+tts_type llama_cap_context_tts::getTTSType(llama_cap_context* main_ctx, json speaker) {
     if (speaker.is_object() && speaker.contains("version")) {
         std::string version = speaker["version"].get<std::string>();
         if (version == "0.2") {
@@ -489,7 +489,7 @@ tts_type llama_rn_context_tts::getTTSType(llama_rn_context* main_ctx, json speak
     return OUTETTS_V0_2;
 }
 
-llama_rn_audio_completion_result llama_rn_context_tts::getFormattedAudioCompletion(llama_rn_context* main_ctx, const std::string &speaker_json_str, const std::string &text_to_speak) {
+llama_cap_audio_completion_result llama_cap_context_tts::getFormattedAudioCompletion(llama_cap_context* main_ctx, const std::string &speaker_json_str, const std::string &text_to_speak) {
     std::string audio_text = default_audio_text;
     std::string audio_data = default_audio_data;
 
@@ -522,7 +522,7 @@ llama_rn_audio_completion_result llama_rn_context_tts::getFormattedAudioCompleti
     }
 }
 
-std::vector<llama_token> llama_rn_context_tts::getAudioCompletionGuideTokens(llama_rn_context* main_ctx, const std::string &text_to_speak) {
+std::vector<llama_token> llama_cap_context_tts::getAudioCompletionGuideTokens(llama_cap_context* main_ctx, const std::string &text_to_speak) {
     const llama_vocab * vocab = llama_model_get_vocab(main_ctx->model);
     const tts_type tts_type = getTTSType(main_ctx);
     std::string clean_text = process_text(text_to_speak, tts_type);
@@ -557,7 +557,7 @@ std::vector<llama_token> llama_rn_context_tts::getAudioCompletionGuideTokens(lla
     return result;
 }
 
-std::vector<float> llama_rn_context_tts::decodeAudioTokens(llama_rn_context* main_ctx, const std::vector<llama_token> &tokens) {
+std::vector<float> llama_cap_context_tts::decodeAudioTokens(llama_cap_context* main_ctx, const std::vector<llama_token> &tokens) {
     std::vector<llama_token> tokens_audio = tokens;
     tts_type tts_type = getTTSType(main_ctx);
     if (tts_type == OUTETTS_V0_3 || tts_type == OUTETTS_V0_2) {

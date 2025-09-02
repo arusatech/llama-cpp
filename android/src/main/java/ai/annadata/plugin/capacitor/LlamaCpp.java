@@ -5,6 +5,13 @@ import com.getcapacitor.JSObject;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.List;
 
 // MARK: - Result Types
 class LlamaResult<T> {
@@ -244,9 +251,16 @@ public class LlamaCpp {
     private native long initContextNative(String modelPath, JSObject params);
     private native void releaseContextNative(long nativeContextId);
     private native String completionNative(long contextId, String prompt);
+    private native Map<String, Object> modelInfoNative(String modelPath);
     private native void stopCompletionNative(long contextId);
     private native String getFormattedChatNative(long contextId, String messages, String chatTemplate);
     private native boolean toggleNativeLogNative(boolean enabled);
+    
+    // Model download and management methods
+    private native String downloadModelNative(String url, String filename);
+    private native Map<String, Object> getDownloadProgressNative(String url);
+    private native boolean cancelDownloadNative(String url);
+    private native List<Map<String, Object>> getAvailableModelsNative();
 
     static {
         try {
@@ -281,16 +295,141 @@ public class LlamaCpp {
         callback.onResult(LlamaResult.success(null));
     }
 
+    public void downloadModel(String url, String filename, LlamaCallback<String> callback) {
+        try {
+            Log.i(TAG, "Starting download of model: " + filename + " from: " + url);
+            String localPath = downloadModelNative(url, filename);
+            
+            // Start download in background thread
+            new Thread(() -> {
+                try {
+                    downloadFile(url, localPath, callback);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error in download thread: " + e.getMessage());
+                    callback.onResult(LlamaResult.failure(new LlamaError("Download failed: " + e.getMessage())));
+                }
+            }).start();
+            
+            // Return the local path immediately
+            callback.onResult(LlamaResult.success(localPath));
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error preparing download: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("Download preparation failed: " + e.getMessage())));
+        }
+    }
+    
+    private void downloadFile(String url, String localPath, LlamaCallback<String> callback) {
+        try {
+            URL downloadUrl = new URL(url);
+            HttpURLConnection connection = (HttpURLConnection) downloadUrl.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout(0); // No timeout for large files
+            
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw new IOException("HTTP error code: " + responseCode);
+            }
+            
+            long fileSize = connection.getContentLengthLong();
+            Log.i(TAG, "File size: " + fileSize + " bytes");
+            
+            try (InputStream inputStream = connection.getInputStream();
+                 FileOutputStream outputStream = new FileOutputStream(localPath)) {
+                
+                byte[] buffer = new byte[8192];
+                long downloadedBytes = 0;
+                int bytesRead;
+                
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                    downloadedBytes += bytesRead;
+                    
+                    // Log progress every 1MB
+                    if (downloadedBytes % (1024 * 1024) == 0) {
+                        double progress = fileSize > 0 ? (double) downloadedBytes / fileSize * 100 : 0;
+                        Log.i(TAG, String.format("Download progress: %.1f%% (%d/%d bytes)", 
+                            progress, downloadedBytes, fileSize));
+                    }
+                }
+            }
+            
+            Log.i(TAG, "Download completed successfully: " + localPath);
+            callback.onResult(LlamaResult.success(localPath));
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Download failed: " + e.getMessage());
+            // Clean up partial file
+            try {
+                new File(localPath).delete();
+            } catch (Exception ignored) {}
+            
+            callback.onResult(LlamaResult.failure(new LlamaError("Download failed: " + e.getMessage())));
+        }
+    }
+
+    public void getDownloadProgress(String url, LlamaCallback<Map<String, Object>> callback) {
+        try {
+            Map<String, Object> progress = getDownloadProgressNative(url);
+            if (progress != null) {
+                callback.onResult(LlamaResult.success(progress));
+            } else {
+                callback.onResult(LlamaResult.failure(new LlamaError("No download in progress for this URL")));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting download progress: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to get progress: " + e.getMessage())));
+        }
+    }
+
+    public void cancelDownload(String url, LlamaCallback<Boolean> callback) {
+        try {
+            boolean cancelled = cancelDownloadNative(url);
+            callback.onResult(LlamaResult.success(cancelled));
+        } catch (Exception e) {
+            Log.e(TAG, "Error cancelling download: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to cancel download: " + e.getMessage())));
+        }
+    }
+
+    public void getAvailableModels(LlamaCallback<List<Map<String, Object>>> callback) {
+        try {
+            List<Map<String, Object>> models = getAvailableModelsNative();
+            callback.onResult(LlamaResult.success(models));
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting available models: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("Failed to get models: " + e.getMessage())));
+        }
+    }
+
     public void modelInfo(String path, String[] skip, LlamaCallback<Map<String, Object>> callback) {
-        // This would typically load model info from the GGUF file
-        // For now, return a basic structure
-        Map<String, Object> modelInfo = new HashMap<>();
-        modelInfo.put("path", path);
-        modelInfo.put("desc", "Sample model");
-        modelInfo.put("size", 0);
-        modelInfo.put("nEmbd", 0);
-        modelInfo.put("nParams", 0);
-        callback.onResult(LlamaResult.success(modelInfo));
+        try {
+            // Call native method to get actual model info
+            Map<String, Object> modelInfo = modelInfoNative(path);
+            if (modelInfo != null) {
+                callback.onResult(LlamaResult.success(modelInfo));
+            } else {
+                // Fallback to basic info if native method fails
+                Map<String, Object> fallbackInfo = new HashMap<>();
+                fallbackInfo.put("path", path);
+                fallbackInfo.put("desc", "Model file found but info unavailable");
+                fallbackInfo.put("size", 0);
+                fallbackInfo.put("nEmbd", 0);
+                fallbackInfo.put("nParams", 0);
+                callback.onResult(LlamaResult.success(fallbackInfo));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting model info: " + e.getMessage());
+            // Return error info
+            Map<String, Object> errorInfo = new HashMap<>();
+            errorInfo.put("path", path);
+            errorInfo.put("desc", "Error reading model: " + e.getMessage());
+            errorInfo.put("size", 0);
+            errorInfo.put("nEmbd", 0);
+            errorInfo.put("nParams", 0);
+            callback.onResult(LlamaResult.success(errorInfo));
+        }
     }
 
     public void initContext(int contextId, JSObject params, LlamaCallback<Map<String, Object>> callback) {

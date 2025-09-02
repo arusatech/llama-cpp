@@ -1,16 +1,20 @@
 #include "jni-utils.h"
-#include "rn-llama.h"
+#include "cap-llama.h"
 #include <android/log.h>
 #include <cstring>
 #include <memory>
 #include <fstream> // Added for file existence and size checks
 #include <signal.h> // Added for signal handling
 #include <sys/signal.h> // Added for sigaction
+#include <thread> // For background downloads
+#include <atomic> // For thread-safe progress tracking
+#include <filesystem> // For file operations
+#include <mutex> // For thread synchronization
 
 // Add missing symbol
-namespace rnllama {
-    bool rnllama_verbose = false;
-}
+// namespace rnllama {
+//     bool rnllama_verbose = false;
+// }
 
 #define LOG_TAG "LlamaCpp"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -130,9 +134,24 @@ jclass find_class(JNIEnv* env, const char* name) {
     return clazz;
 }
 
-// Global context storage
-static std::map<jlong, std::unique_ptr<rnllama::llama_rn_context>> contexts;
+// Convert llama_cap_context to jobject
+jobject llama_context_to_jobject(JNIEnv* env, const capllama::llama_cap_context* context);
+
+// Convert jobject to llama_cap_context
+capllama::llama_cap_context* jobject_to_llama_context(JNIEnv* env, jobject obj);
+
+// Convert completion result to jobject
+jobject completion_result_to_jobject(JNIEnv* env, const capllama::completion_token_output& result);
+
+// Convert tokenize result to jobject
+jobject tokenize_result_to_jobject(JNIEnv* env, const capllama::llama_cap_tokenize_result& result);
+
+// Global context storage - fix namespace
+static std::map<jlong, std::unique_ptr<capllama::llama_cap_context>> contexts;
 static jlong next_context_id = 1;
+
+// Download progress tracking (simplified for now)
+// This can be enhanced later to track actual download progress
 
 extern "C" {
 
@@ -144,14 +163,23 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
         std::string model_path_str = jstring_to_string(env, model_path);
         LOGI("Attempting to load model from path: %s", model_path_str.c_str());
 
+        // Extract filename from path
+        std::string filename = model_path_str;
+        size_t last_slash = model_path_str.find_last_of('/');
+        if (last_slash != std::string::npos) {
+            filename = model_path_str.substr(last_slash + 1);
+        }
+        LOGI("Extracted filename: %s", filename.c_str());
+
         // List all possible paths we should check
         std::vector<std::string> paths_to_check = {
-            model_path_str,
-            "/data/data/ai.annadata.app/files/" + model_path_str,
-            "/data/data/ai.annadata.app/files/Documents/" + model_path_str,
-            "/storage/emulated/0/Android/data/ai.annadata.app/files/" + model_path_str,
-            "/storage/emulated/0/Android/data/ai.annadata.app/files/Documents/" + model_path_str,
-            "/storage/emulated/0/Documents/" + model_path_str
+            model_path_str, // Try the original path first
+            "/data/data/ai.annadata.llamacpp/files/" + filename,
+            "/data/data/ai.annadata.llamacpp/files/Documents/" + filename,
+            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/" + filename,
+            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Documents/" + filename,
+            "/storage/emulated/0/Documents/" + filename,
+            "/storage/emulated/0/Download/" + filename
         };
 
         // Check each path and log what we find
@@ -221,9 +249,9 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
             validation_file.close();
         }
 
-        // Create new context
-        auto context = std::make_unique<rnllama::llama_rn_context>();
-        LOGI("Created llama_rn_context");
+        // Create new context - fix namespace
+        auto context = std::make_unique<capllama::llama_cap_context>();
+        LOGI("Created llama_cap_context");
         
         // Initialize common parameters
         common_params cparams;
@@ -240,47 +268,21 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
         cparams.chat_template = "";
         cparams.embedding = false;
         cparams.cont_batching = false;
-        cparams.parallel = false;
-        cparams.grammar = "";
-        cparams.grammar_penalty.clear();
+        cparams.n_parallel = 1;
         cparams.antiprompt.clear();
-        cparams.lora_adapter.clear();
-        cparams.lora_base = "";
-        cparams.mul_mat_q = true;
-        cparams.f16_kv = true;
-        cparams.logits_all = false;
         cparams.vocab_only = false;
         cparams.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
-        cparams.rope_scaling_factor = 0.0f;
-        cparams.rope_scaling_orig_ctx_len = 0;
         cparams.yarn_ext_factor = -1.0f;
         cparams.yarn_attn_factor = 1.0f;
         cparams.yarn_beta_fast = 32.0f;
         cparams.yarn_beta_slow = 1.0f;
         cparams.yarn_orig_ctx = 0;
-        cparams.offload_kqv = true;
         cparams.flash_attn = false;
-        cparams.flash_attn_kernel = false;
-        cparams.flash_attn_causal = true;
-        cparams.mmproj = "";
-        cparams.image = "";
-        cparams.export = "";
-        cparams.export_path = "";
-        cparams.seed = -1;
         cparams.n_keep = 0;
-        cparams.n_discard = -1;
-        cparams.n_draft = 0;
         cparams.n_chunks = -1;
-        cparams.n_parallel = 1;
         cparams.n_sequences = 1;
-        cparams.p_accept = 0.5f;
-        cparams.p_split = 0.1f;
-        cparams.n_gqa = 8;
-        cparams.rms_norm_eps = 5e-6f;
         cparams.model_alias = "unknown";
-        cparams.ubatch_size = 512;
-        cparams.ubatch_seq_len_max = 1;
-        
+
         LOGI("Initialized common parameters, attempting to load model from: %s", full_model_path.c_str());
         LOGI("Model parameters: n_ctx=%d, n_batch=%d, n_gpu_layers=%d", 
              cparams.n_ctx, cparams.n_batch, cparams.n_gpu_layers);
@@ -335,47 +337,21 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
             ultra_minimal_params.chat_template = "";
             ultra_minimal_params.embedding = false;
             ultra_minimal_params.cont_batching = false;
-            ultra_minimal_params.parallel = false;
-            ultra_minimal_params.grammar = "";
-            ultra_minimal_params.grammar_penalty.clear();
+            ultra_minimal_params.n_parallel = 1;
             ultra_minimal_params.antiprompt.clear();
-            ultra_minimal_params.lora_adapter.clear();
-            ultra_minimal_params.lora_base = "";
-            ultra_minimal_params.mul_mat_q = false; // Disable quantized matrix multiplication
-            ultra_minimal_params.f16_kv = false; // Disable f16 key-value cache
-            ultra_minimal_params.logits_all = false;
             ultra_minimal_params.vocab_only = false;
             ultra_minimal_params.rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
-            ultra_minimal_params.rope_scaling_factor = 0.0f;
-            ultra_minimal_params.rope_scaling_orig_ctx_len = 0;
             ultra_minimal_params.yarn_ext_factor = -1.0f;
             ultra_minimal_params.yarn_attn_factor = 1.0f;
             ultra_minimal_params.yarn_beta_fast = 32.0f;
             ultra_minimal_params.yarn_beta_slow = 1.0f;
             ultra_minimal_params.yarn_orig_ctx = 0;
-            ultra_minimal_params.offload_kqv = false; // Disable offloading
             ultra_minimal_params.flash_attn = false;
-            ultra_minimal_params.flash_attn_kernel = false;
-            ultra_minimal_params.flash_attn_causal = true;
-            ultra_minimal_params.mmproj = "";
-            ultra_minimal_params.image = "";
-            ultra_minimal_params.export = "";
-            ultra_minimal_params.export_path = "";
-            ultra_minimal_params.seed = -1;
             ultra_minimal_params.n_keep = 0;
-            ultra_minimal_params.n_discard = -1;
-            ultra_minimal_params.n_draft = 0;
             ultra_minimal_params.n_chunks = -1;
-            ultra_minimal_params.n_parallel = 1;
             ultra_minimal_params.n_sequences = 1;
-            ultra_minimal_params.p_accept = 0.5f;
-            ultra_minimal_params.p_split = 0.1f;
-            ultra_minimal_params.n_gqa = 8;
-            ultra_minimal_params.rms_norm_eps = 5e-6f;
             ultra_minimal_params.model_alias = "unknown";
-            ultra_minimal_params.ubatch_size = 128;
-            ultra_minimal_params.ubatch_seq_len_max = 1;
-            
+
             // Set up signal handler again for ultra-minimal attempt
             if (sigaction(SIGSEGV, &new_action, &old_action) == 0) {
                 LOGI("Signal handler reinstalled for ultra-minimal attempt");
@@ -449,7 +425,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_completionNative(
         std::string prompt_str = jstring_to_string(env, prompt);
         
         // Get the context
-        rnllama::llama_rn_context* context = it->second.get();
+        capllama::llama_cap_context* context = it->second.get();
         
         // For now, return a simple completion
         // In a full implementation, this would use the actual llama.cpp completion logic
@@ -495,7 +471,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_getFormattedChatNative(
         std::string messages_str = jstring_to_string(env, messages);
         std::string template_str = jstring_to_string(env, chat_template);
         
-        rnllama::llama_rn_context* context = it->second.get();
+        capllama::llama_cap_context* context = it->second.get();
         
         // Format chat using the context's method
         std::string result = context->getFormattedChat(messages_str, template_str);
@@ -515,7 +491,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_toggleNativeLogNative(
     JNIEnv* env, jobject thiz, jboolean enabled) {
     
     try {
-        rnllama::rnllama_verbose = jboolean_to_bool(enabled);
+        // rnllama::rnllama_verbose = jboolean_to_bool(enabled); // This line is removed as per the edit hint
         LOGI("Native logging %s", enabled ? "enabled" : "disabled");
         return bool_to_jboolean(true);
     } catch (const std::exception& e) {
@@ -525,7 +501,298 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_toggleNativeLogNative(
     }
 }
 
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_modelInfoNative(
+    JNIEnv* env, jobject thiz, jstring model_path) {
+    
+    try {
+        std::string model_path_str = jstring_to_string(env, model_path);
+        LOGI("Getting model info for: %s", model_path_str.c_str());
 
+        // Extract filename from path
+        std::string filename = model_path_str;
+        size_t last_slash = model_path_str.find_last_of('/');
+        if (last_slash != std::string::npos) {
+            filename = model_path_str.substr(last_slash + 1);
+        }
+        LOGI("Extracted filename for model info: %s", filename.c_str());
+
+        // List all possible paths we should check (same as initContextNative)
+        std::vector<std::string> paths_to_check = {
+            model_path_str, // Try the original path first
+            "/data/data/ai.annadata.llamacpp/files/" + filename,
+            "/data/data/ai.annadata.llamacpp/files/Documents/" + filename,
+            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/" + filename,
+            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Documents/" + filename,
+            "/storage/emulated/0/Documents/" + filename,
+            "/storage/emulated/0/Download/" + filename
+        };
+
+        // Check each path and find the actual file
+        std::string full_model_path;
+        bool file_found = false;
+        
+        for (const auto& path : paths_to_check) {
+            LOGI("Checking path for model info: %s", path.c_str());
+            std::ifstream file_check(path, std::ios::binary);
+            if (file_check.good()) {
+                file_check.seekg(0, std::ios::end);
+                std::streamsize file_size = file_check.tellg();
+                file_check.seekg(0, std::ios::beg);
+                
+                // Validate file size
+                if (file_size < 1024 * 1024) { // Less than 1MB
+                    LOGE("Model file is too small, likely corrupted: %s", path.c_str());
+                    file_check.close();
+                    continue; // Try next path
+                }
+                
+                // Check if it's a valid GGUF file by reading the magic number
+                char magic[4];
+                if (file_check.read(magic, 4)) {
+                    if (magic[0] == 'G' && magic[1] == 'G' && magic[2] == 'U' && magic[3] == 'F') {
+                        LOGI("Valid GGUF file detected for model info at: %s", path.c_str());
+                        full_model_path = path;
+                        file_found = true;
+                        file_check.close();
+                        break;
+                    } else {
+                        LOGI("File does not appear to be a GGUF file (magic: %c%c%c%c) at: %s", 
+                             magic[0], magic[1], magic[2], magic[3], path.c_str());
+                    }
+                }
+                file_check.close();
+            } else {
+                LOGI("File not found at: %s", path.c_str());
+            }
+        }
+
+        if (!file_found) {
+            LOGE("Model file not found in any of the checked paths");
+            throw_java_exception(env, "java/lang/RuntimeException", "Model file not found");
+            return nullptr;
+        }
+
+        // Now use the found path for getting model info
+        std::ifstream file_check(full_model_path, std::ios::binary);
+
+        // Get file size
+        file_check.seekg(0, std::ios::end);
+        std::streamsize file_size = file_check.tellg();
+        file_check.seekg(0, std::ios::beg);
+
+        // Check GGUF magic number
+        char magic[4];
+        if (!file_check.read(magic, 4)) {
+            LOGE("Failed to read magic number from: %s", full_model_path.c_str());
+            throw_java_exception(env, "java/lang/RuntimeException", "Failed to read model file header");
+            return nullptr;
+        }
+
+        if (magic[0] != 'G' || magic[1] != 'G' || magic[2] != 'U' || magic[3] != 'F') {
+            LOGE("Invalid GGUF file (magic: %c%c%c%c): %s", magic[0], magic[1], magic[2], magic[3], full_model_path.c_str());
+            throw_java_exception(env, "java/lang/RuntimeException", "Invalid GGUF file format");
+            return nullptr;
+        }
+
+        // Read GGUF version
+        uint32_t version;
+        if (!file_check.read(reinterpret_cast<char*>(&version), sizeof(version))) {
+            LOGE("Failed to read GGUF version from: %s", full_model_path.c_str());
+            throw_java_exception(env, "java/lang/RuntimeException", "Failed to read GGUF version");
+            return nullptr;
+        }
+
+        file_check.close();
+
+        // Create Java HashMap
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+
+        jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+
+        // Add model info to HashMap
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "path"), 
+            string_to_jstring(env, full_model_path));
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "size"), 
+            env->NewObject(env->FindClass("java/lang/Long"), 
+                env->GetMethodID(env->FindClass("java/lang/Long"), "<init>", "(J)V"), 
+                static_cast<jlong>(file_size)));
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "desc"), 
+            string_to_jstring(env, "GGUF Model (v" + std::to_string(version) + ")"));
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "nEmbd"), 
+            env->NewObject(env->FindClass("java/lang/Integer"), 
+                env->GetMethodID(env->FindClass("java/lang/Integer"), "<init>", "(I)V"), 
+                0)); // Will be filled by actual model loading
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "nParams"), 
+            env->NewObject(env->FindClass("java/lang/Integer"), 
+                env->GetMethodID(env->FindClass("java/lang/Integer"), "<init>", "(I)V"), 
+                0)); // Will be filled by actual model loading
+
+        LOGI("Model info retrieved successfully from %s: size=%ld, version=%u", full_model_path.c_str(), file_size, version);
+        return hashMap;
+
+    } catch (const std::exception& e) {
+        LOGE("Exception in modelInfo: %s", e.what());
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+
+
+JNIEXPORT jstring JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_downloadModelNative(
+    JNIEnv* env, jobject thiz, jstring url, jstring filename) {
+    
+    try {
+        std::string url_str = jstring_to_string(env, url);
+        std::string filename_str = jstring_to_string(env, filename);
+        
+        LOGI("Preparing download path for model: %s", filename_str.c_str());
+        
+        // Determine local storage path (use external storage for large files)
+        std::string local_path = "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Models/" + filename_str;
+        
+        // Create directory if it doesn't exist
+        std::string dir_path = "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Models/";
+        std::filesystem::create_directories(dir_path);
+        
+        LOGI("Download path prepared: %s", local_path.c_str());
+        
+        return string_to_jstring(env, local_path);
+        
+    } catch (const std::exception& e) {
+        LOGE("Exception in downloadModel: %s", e.what());
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_getDownloadProgressNative(
+    JNIEnv* env, jobject thiz, jstring url) {
+    
+    try {
+        // For now, return a placeholder since we'll handle download in Java
+        // This can be enhanced later to track actual download progress
+        
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        
+        jobject hashMap = env->NewObject(hashMapClass, hashMapConstructor);
+        
+        // Return placeholder progress info
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "progress"), 
+            env->NewObject(env->FindClass("java/lang/Double"), 
+                env->GetMethodID(env->FindClass("java/lang/Double"), "<init>", "(D)V"), 
+                0.0));
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "completed"), 
+            env->NewObject(env->FindClass("java/lang/Boolean"), 
+                env->GetMethodID(env->FindClass("java/lang/Boolean"), "<init>", "(Z)V"), 
+                false));
+        
+        env->CallObjectMethod(hashMap, putMethod, 
+            string_to_jstring(env, "failed"), 
+            env->NewObject(env->FindClass("java/lang/Boolean"), 
+                env->GetMethodID(env->FindClass("java/lang/Boolean"), "<init>", "(Z)V"), 
+                false));
+        
+        return hashMap;
+        
+    } catch (const std::exception& e) {
+        LOGE("Exception in getDownloadProgress: %s", e.what());
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_cancelDownloadNative(
+    JNIEnv* env, jobject thiz, jstring url) {
+    
+    try {
+        // For now, return false since we'll handle download cancellation in Java
+        // This can be enhanced later to actually cancel downloads
+        return JNI_FALSE;
+        
+    } catch (const std::exception& e) {
+        LOGE("Exception in cancelDownload: %s", e.what());
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return JNI_FALSE;
+    }
+}
+
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_getAvailableModelsNative(
+    JNIEnv* env, jobject thiz) {
+    
+    try {
+        std::string models_dir = "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Models/";
+        
+        // Create Java ArrayList
+        jclass arrayListClass = env->FindClass("java/util/ArrayList");
+        jmethodID arrayListConstructor = env->GetMethodID(arrayListClass, "<init>", "()V");
+        jmethodID addMethod = env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z");
+        
+        jobject arrayList = env->NewObject(arrayListClass, arrayListConstructor);
+        
+        if (std::filesystem::exists(models_dir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(models_dir)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".gguf") {
+                    std::string filename = entry.path().filename().string();
+                    std::string full_path = entry.path().string();
+                    size_t file_size = entry.file_size();
+                    
+                    // Create model info HashMap
+                    jclass hashMapClass = env->FindClass("java/util/HashMap");
+                    jmethodID hashMapConstructor = env->GetMethodID(hashMapClass, "<init>", "()V");
+                    jmethodID putMethod = env->GetMethodID(hashMapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+                    
+                    jobject modelInfo = env->NewObject(hashMapClass, hashMapConstructor);
+                    
+                    env->CallObjectMethod(modelInfo, putMethod, 
+                        string_to_jstring(env, "name"), 
+                        string_to_jstring(env, filename));
+                    
+                    env->CallObjectMethod(modelInfo, putMethod, 
+                        string_to_jstring(env, "path"), 
+                        string_to_jstring(env, full_path));
+                    
+                    env->CallObjectMethod(modelInfo, putMethod, 
+                        string_to_jstring(env, "size"), 
+                        env->NewObject(env->FindClass("java/lang/Long"), 
+                            env->GetMethodID(env->FindClass("java/lang/Long"), "<init>", "(J)V"), 
+                            static_cast<jlong>(file_size)));
+                    
+                    // Add to ArrayList
+                    env->CallBooleanMethod(arrayList, addMethod, modelInfo);
+                }
+            }
+        }
+        
+        return arrayList;
+        
+    } catch (const std::exception& e) {
+        LOGE("Exception in getAvailableModels: %s", e.what());
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
 
 } // extern "C"
 

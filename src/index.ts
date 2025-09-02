@@ -735,6 +735,35 @@ export async function releaseAllLlama(): Promise<void> {
   return LlamaCpp.releaseAllContexts();
 }
 
+// Model download and management functions
+export async function downloadModel(url: string, filename: string): Promise<string> {
+  return LlamaCpp.downloadModel({ url, filename });
+}
+
+export async function getDownloadProgress(url: string): Promise<{
+  progress: number;
+  completed: boolean;
+  failed: boolean;
+  errorMessage?: string;
+  localPath?: string;
+  downloadedBytes: number;
+  totalBytes: number;
+}> {
+  return LlamaCpp.getDownloadProgress({ url });
+}
+
+export async function cancelDownload(url: string): Promise<boolean> {
+  return LlamaCpp.cancelDownload({ url });
+}
+
+export async function getAvailableModels(): Promise<Array<{
+  name: string;
+  path: string;
+  size: number;
+}>> {
+  return LlamaCpp.getAvailableModels();
+}
+
 export const BuildInfo = {
   number: '1.0.0',
   commit: 'capacitor-llama-cpp',

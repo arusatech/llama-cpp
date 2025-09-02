@@ -76,9 +76,9 @@ set(
     ${LLAMACPP_LIB_DIR}/minja/minja.hpp
     ${LLAMACPP_LIB_DIR}/minja/chat-template.hpp
     ${LLAMACPP_LIB_DIR}/anyascii.c
-    ${LLAMACPP_LIB_DIR}/rn-llama.cpp
-    ${LLAMACPP_LIB_DIR}/rn-completion.cpp
-    ${LLAMACPP_LIB_DIR}/rn-tts.cpp
+    ${LLAMACPP_LIB_DIR}/cap-llama.cpp
+    ${LLAMACPP_LIB_DIR}/cap-completion.cpp
+    ${LLAMACPP_LIB_DIR}/cap-tts.cpp
     ${CMAKE_SOURCE_DIR}/jni-utils.h
     ${CMAKE_SOURCE_DIR}/jni.cpp
 )

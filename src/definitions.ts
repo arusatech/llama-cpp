@@ -736,6 +736,34 @@ export interface LlamaCppPlugin {
 
   releaseVocoder(options: { contextId: number }): Promise<void>;
 
+  // Model download and management
+  downloadModel(options: {
+    url: string;
+    filename: string;
+  }): Promise<string>;
+
+  getDownloadProgress(options: {
+    url: string;
+  }): Promise<{
+    progress: number;
+    completed: boolean;
+    failed: boolean;
+    errorMessage?: string;
+    localPath?: string;
+    downloadedBytes: number;
+    totalBytes: number;
+  }>;
+
+  cancelDownload(options: {
+    url: string;
+  }): Promise<boolean>;
+
+  getAvailableModels(): Promise<Array<{
+    name: string;
+    path: string;
+    size: number;
+  }>>;
+
   // Events
   addListener(eventName: string, listenerFunc: (data: any) => void): Promise<void>;
   removeAllListeners(eventName: string): Promise<void>;
