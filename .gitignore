@@ -82,3 +82,58 @@ captures
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
+
+# Android build artifacts and generated files
+android/build/
+android/.cxx/
+android/src/main/jniLibs/
+android/src/main/obj/
+android/src/main/libs/
+android/app/build/
+android/app/src/main/jniLibs/
+android/app/src/main/obj/
+android/app/src/main/libs/
+
+# CMake build artifacts
+android/CMakeFiles/
+android/cmake_install.cmake
+android/CMakeCache.txt
+android/Makefile
+android/build.ninja
+android/.ninja_log
+
+# iOS build artifacts
+ios/build/
+ios/DerivedData/
+ios/*.framework/
+ios/*.dylib
+ios/*.a
+
+# Temporary build scripts (keep only the working one)
+build-native-x86_64-*.sh
+build-native-x86_64-clean.sh
+build-native-x86_64-fixed.sh
+
+# Backup files created by build scripts
+*.backup
+*.orig
+
+# Generated documentation
+docs/
+*.md.bak
+
+# Test outputs
+test/output/
+test/coverage/
+test/results/
+
+# IDE and editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

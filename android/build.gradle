@@ -28,7 +28,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         ndk {
-            abiFilters 'arm64-v8a'
+            abiFilters 'x86_64'
         }
     }
     
@@ -36,26 +36,39 @@ android {
         cmake {
             path "src/main/CMakeLists.txt"
             version "3.22.1"
+            // Explicitly set NDK version to avoid Windows dependencies
+            ndkVersion "29.0.13113456"
         }
     }
+    
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    
     lintOptions {
         abortOnError false
     }
+    
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
+    
     sourceSets {
         main {
             java {
                 srcDirs = ['src/main/java']
             }
+        }
+    }
+    
+    // Disable clean tasks that might cause issues
+    tasks.whenTaskAdded { task ->
+        if (task.name.contains('Clean') && task.name.contains('Debug')) {
+            task.enabled = false
         }
     }
 }
@@ -64,7 +77,6 @@ repositories {
     google()
     mavenCentral()
 }
-
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])

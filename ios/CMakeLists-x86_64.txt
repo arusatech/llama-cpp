@@ -1,0 +1,164 @@
+cmake_minimum_required(VERSION 3.16)
+project(llama-cpp VERSION 1.0.0 LANGUAGES CXX C)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# iOS specific settings for x86_64 emulator
+set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0)
+set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
+
+# Dependencies and compile options optimized for x86_64
+add_definitions(
+    -DNDEBUG
+    -DO3
+    -DLM_GGML_USE_CPU
+    -DLM_GGML_USE_ACCELERATE
+    -DLM_GGML_USE_METAL
+    -DLM_GGML_METAL_USE_BF16
+)
+
+# X86_64 specific optimizations for emulator
+add_definitions(-DLM_GGML_CPU_GENERIC)
+add_definitions(-DLM_GGML_USE_AVX2)
+add_definitions(-DLM_GGML_USE_AVX)
+add_definitions(-DLM_GGML_USE_SSE3)
+add_definitions(-DLM_GGML_USE_SSE)
+add_definitions(-DLM_GGML_USE_F16C)
+add_definitions(-DLM_GGML_USE_FMA)
+
+set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../cpp)
+
+# Use x86_64 optimized source files for emulator
+set(SOURCE_FILES_ARCH
+    ${SOURCE_DIR}/ggml-cpu/arch/x86/quants.c
+    ${SOURCE_DIR}/ggml-cpu/arch/x86/repack.cpp
+)
+
+# Define public headers
+set(PUBLIC_HEADERS
+    ${SOURCE_DIR}/cap-llama.h
+    ${SOURCE_DIR}/cap-completion.h
+    ${SOURCE_DIR}/cap-tts.h
+    ${SOURCE_DIR}/llama.h
+    ${SOURCE_DIR}/ggml.h
+)
+
+# Create library target
+add_library(llama-cpp SHARED
+    ${SOURCE_DIR}/ggml.c
+    ${SOURCE_DIR}/ggml-alloc.c
+    ${SOURCE_DIR}/ggml-backend.cpp
+    ${SOURCE_DIR}/ggml-backend-reg.cpp
+    ${SOURCE_DIR}/ggml-cpu/amx/amx.cpp
+    ${SOURCE_DIR}/ggml-cpu/amx/mmq.cpp
+    ${SOURCE_DIR}/ggml-cpu/ggml-cpu.c
+    ${SOURCE_DIR}/ggml-cpu/ggml-cpu.cpp
+    ${SOURCE_DIR}/ggml-cpu/quants.c
+    ${SOURCE_DIR}/ggml-cpu/traits.cpp
+    ${SOURCE_DIR}/ggml-cpu/repack.cpp
+    ${SOURCE_DIR}/ggml-cpu/unary-ops.cpp
+    ${SOURCE_DIR}/ggml-cpu/binary-ops.cpp
+    ${SOURCE_DIR}/ggml-cpu/vec.cpp
+    ${SOURCE_DIR}/ggml-cpu/ops.cpp
+    ${SOURCE_DIR}/ggml-metal.m
+    ${SOURCE_DIR}/ggml-opt.cpp
+    ${SOURCE_DIR}/ggml-threading.cpp
+    ${SOURCE_DIR}/ggml-quants.c
+    ${SOURCE_DIR}/gguf.cpp
+    ${SOURCE_DIR}/log.cpp
+    ${SOURCE_DIR}/llama-impl.cpp
+    ${SOURCE_DIR}/llama-grammar.cpp
+    ${SOURCE_DIR}/llama-sampling.cpp
+    ${SOURCE_DIR}/llama-vocab.cpp
+    ${SOURCE_DIR}/llama-adapter.cpp
+    ${SOURCE_DIR}/llama-chat.cpp
+    ${SOURCE_DIR}/llama-context.cpp
+    ${SOURCE_DIR}/llama-arch.cpp
+    ${SOURCE_DIR}/llama-batch.cpp
+    ${SOURCE_DIR}/llama-cparams.cpp
+    ${SOURCE_DIR}/llama-hparams.cpp
+    ${SOURCE_DIR}/llama.cpp
+    ${SOURCE_DIR}/llama-model.cpp
+    ${SOURCE_DIR}/llama-model-loader.cpp
+    ${SOURCE_DIR}/llama-model-saver.cpp
+    ${SOURCE_DIR}/llama-mmap.cpp
+    ${SOURCE_DIR}/llama-kv-cache.cpp
+    ${SOURCE_DIR}/llama-kv-cache-iswa.cpp
+    ${SOURCE_DIR}/llama-memory-hybrid.cpp
+    ${SOURCE_DIR}/llama-memory-recurrent.cpp
+    ${SOURCE_DIR}/llama-memory.cpp
+    ${SOURCE_DIR}/llama-io.cpp
+    ${SOURCE_DIR}/llama-graph.cpp
+    ${SOURCE_DIR}/sampling.cpp
+    ${SOURCE_DIR}/unicode-data.cpp
+    ${SOURCE_DIR}/unicode.cpp
+    ${SOURCE_DIR}/common.cpp
+    ${SOURCE_DIR}/chat.cpp
+    ${SOURCE_DIR}/json-schema-to-grammar.cpp
+    ${SOURCE_DIR}/minja/minja.hpp
+    ${SOURCE_DIR}/minja/chat-template.hpp
+    ${SOURCE_DIR}/nlohmann/json.hpp
+    ${SOURCE_DIR}/nlohmann/json_fwd.hpp
+    ${SOURCE_DIR}/cap-llama.cpp
+    ${SOURCE_DIR}/cap-completion.cpp
+    ${SOURCE_DIR}/cap-tts.cpp
+    ${SOURCE_FILES_ARCH}
+)
+
+# Set target properties
+set_target_properties(llama-cpp PROPERTIES
+    FRAMEWORK TRUE
+    FRAMEWORK_VERSION A
+    MACOSX_FRAMEWORK_IDENTIFIER com.arusatech.llama-cpp
+    MACOSX_FRAMEWORK_BUNDLE_VERSION 1.0.0
+    MACOSX_FRAMEWORK_SHORT_VERSION_STRING 1.0.0
+    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "iPhone Developer"
+    XCODE_ATTRIBUTE_DEVELOPMENT_TEAM ""
+    XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH NO
+    XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+)
+
+# Set include directories
+target_include_directories(llama-cpp PRIVATE
+    ${SOURCE_DIR}
+    ${SOURCE_DIR}/ggml-cpu
+    ${SOURCE_DIR}/tools/mtmd
+)
+
+# Set compile options for x86_64 optimization
+target_compile_options(llama-cpp PRIVATE
+    -march=x86-64
+    -mtune=generic
+    -mavx2
+    -mavx
+    -msse3
+    -msse
+    -mfma
+    -mf16c
+)
+
+# Set link options
+target_link_options(llama-cpp PRIVATE
+    -framework Accelerate
+    -framework Metal
+    -framework MetalKit
+    -framework Foundation
+    -framework CoreGraphics
+)
+
+# Set public headers
+set_target_properties(llama-cpp PROPERTIES
+    PUBLIC_HEADER "${PUBLIC_HEADERS}"
+)
+
+# Install rules
+install(TARGETS llama-cpp
+    FRAMEWORK DESTINATION .
+)
+
+# Print build information
+message(STATUS "Building llama-cpp for x86_64 (emulator)")
+message(STATUS "Source directory: ${SOURCE_DIR}")
+message(STATUS "Architecture: x86_64")
+message(STATUS "Optimizations: AVX2, AVX, SSE3, SSE, FMA, F16C")
