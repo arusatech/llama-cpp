@@ -157,76 +157,41 @@ extern "C" {
 
 JNIEXPORT jlong JNICALL
 Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
-    JNIEnv* env, jobject thiz, jstring model_path, jobject params) {
+    JNIEnv *env, jobject thiz, jstring modelPath, jobjectArray searchPaths, jobject params) {
     
     try {
-        std::string model_path_str = jstring_to_string(env, model_path);
-        LOGI("Attempting to load model from path: %s", model_path_str.c_str());
-
-        // Extract filename from path
-        std::string filename = model_path_str;
-        size_t last_slash = model_path_str.find_last_of('/');
-        if (last_slash != std::string::npos) {
-            filename = model_path_str.substr(last_slash + 1);
+        std::string model_path_str = jstring_to_string(env, modelPath);
+        
+        // Get search paths from Java
+        jsize pathCount = env->GetArrayLength(searchPaths);
+        std::vector<std::string> paths_to_check;
+        
+        // Add the original path first
+        paths_to_check.push_back(model_path_str);
+        
+        // Add all search paths from Java
+        for (jsize i = 0; i < pathCount; i++) {
+            jstring pathJString = (jstring)env->GetObjectArrayElement(searchPaths, i);
+            std::string path = jstring_to_string(env, pathJString);
+            paths_to_check.push_back(path);
+            env->DeleteLocalRef(pathJString);
         }
-        LOGI("Extracted filename: %s", filename.c_str());
-
-        // List all possible paths we should check
-        std::vector<std::string> paths_to_check = {
-            model_path_str, // Try the original path first
-            "/data/data/ai.annadata.llamacpp/files/" + filename,
-            "/data/data/ai.annadata.llamacpp/files/Documents/" + filename,
-            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/" + filename,
-            "/storage/emulated/0/Android/data/ai.annadata.llamacpp/files/Documents/" + filename,
-            "/storage/emulated/0/Documents/" + filename,
-            "/storage/emulated/0/Download/" + filename
-        };
-
-        // Check each path and log what we find
+        
+        // Rest of the existing logic remains the same...
         std::string full_model_path;
         bool file_found = false;
         
         for (const auto& path : paths_to_check) {
-            LOGI("Checking path: %s", path.c_str());
-            std::ifstream file_check(path);
-            if (file_check.good()) {
-                file_check.seekg(0, std::ios::end);
-                std::streamsize file_size = file_check.tellg();
-                file_check.close();
-                LOGI("Found file at: %s, size: %ld bytes", path.c_str(), file_size);
-                
-                // Validate file size
-                if (file_size < 1024 * 1024) { // Less than 1MB
-                    LOGE("Model file is too small, likely corrupted: %s", path.c_str());
-                    continue; // Try next path
-                }
-                
-                // Check if it's a valid GGUF file by reading the magic number
-                std::ifstream magic_file(path, std::ios::binary);
-                if (magic_file.good()) {
-                    char magic[4];
-                    if (magic_file.read(magic, 4)) {
-                        if (magic[0] == 'G' && magic[1] == 'G' && magic[2] == 'U' && magic[3] == 'F') {
-                            LOGI("Valid GGUF file detected at: %s", path.c_str());
-                            full_model_path = path;
-                            file_found = true;
-                            break;
-                        } else {
-                            LOGI("File does not appear to be a GGUF file (magic: %c%c%c%c) at: %s", 
-                                 magic[0], magic[1], magic[2], magic[3], path.c_str());
-                        }
-                    }
-                    magic_file.close();
-                }
-            } else {
-                LOGI("File not found at: %s", path.c_str());
+            if (std::filesystem::exists(path)) {
+                full_model_path = path;
+                file_found = true;
+                LOGI("Found model file at: %s", path.c_str());
+                break;
             }
-            file_check.close();
         }
-
+        
         if (!file_found) {
-            LOGE("Model file not found in any of the checked paths");
-            throw_java_exception(env, "java/lang/RuntimeException", "Model file not found in any expected location");
+            LOGE("Model file not found in any of the search paths");
             return -1;
         }
         

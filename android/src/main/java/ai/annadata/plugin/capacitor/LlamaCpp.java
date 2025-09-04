@@ -12,6 +12,9 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.List;
+import android.content.Context;
+import android.os.Environment;
+import java.util.ArrayList;
 
 // MARK: - Result Types
 class LlamaResult<T> {
@@ -248,7 +251,7 @@ public class LlamaCpp {
     private boolean nativeLogEnabled = false;
 
     // Native method declarations
-    private native long initContextNative(String modelPath, JSObject params);
+    private native long initContextNative(String modelPath, String[] searchPaths, JSObject params);
     private native void releaseContextNative(long nativeContextId);
     private native String completionNative(long contextId, String prompt);
     private native Map<String, Object> modelInfoNative(String modelPath);
@@ -447,8 +450,13 @@ public class LlamaCpp {
                 return;
             }
 
+            String filename = new File(modelPath).getName();
+            
+            // Get dynamic search paths
+            String[] searchPaths = getModelSearchPaths(filename);
+            
             // Call native initialization
-            long nativeContextId = initContextNative(modelPath, params);
+            long nativeContextId = initContextNative(modelPath, searchPaths, params);
             if (nativeContextId < 0) {
                 callback.onResult(LlamaResult.failure(new LlamaError("Failed to initialize native context")));
                 return;
@@ -852,5 +860,34 @@ public class LlamaCpp {
     // MARK: - Callback Interface
     public interface LlamaCallback<T> {
         void onResult(LlamaResult<T> result);
+    }
+
+    // Add this method to get proper storage paths
+    private String[] getModelSearchPaths(String filename) {
+        Context context = getContext(); // You'll need to get context from the plugin
+        String packageName = context.getPackageName();
+        
+        List<String> paths = new ArrayList<>();
+        
+        // Internal storage (always available, no permissions needed)
+        File internalFilesDir = context.getFilesDir();
+        paths.add(internalFilesDir.getAbsolutePath() + "/" + filename);
+        paths.add(internalFilesDir.getAbsolutePath() + "/Documents/" + filename);
+        
+        // External files directory (app-specific, no permissions needed on Android 10+)
+        File externalFilesDir = context.getExternalFilesDir(null);
+        if (externalFilesDir != null) {
+            paths.add(externalFilesDir.getAbsolutePath() + "/" + filename);
+            paths.add(externalFilesDir.getAbsolutePath() + "/Documents/" + filename);
+        }
+        
+        // External storage (requires permissions, may not be available)
+        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+            File externalStorage = Environment.getExternalStorageDirectory();
+            paths.add(externalStorage.getAbsolutePath() + "/Documents/" + filename);
+            paths.add(externalStorage.getAbsolutePath() + "/Download/" + filename);
+        }
+        
+        return paths.toArray(new String[0]);
     }
 }
