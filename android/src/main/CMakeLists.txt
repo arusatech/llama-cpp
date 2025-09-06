@@ -85,51 +85,41 @@ set(
 
 find_library(LOG_LIB log)
 
-# X86_64 specific build function for emulator
-function(build_library_x86_64 target_name)
+# ARM64 specific build function for real devices
+function(build_library_arm64 target_name)
     add_library(
         ${target_name}
         SHARED
         ${SOURCE_FILES}
     )
 
-    # X86_64 specific compile options for emulator
+    # ARM64 specific compile options for real devices
     target_compile_options(${target_name} PRIVATE
-        -march=x86-64
-        -mtune=generic
-        -mavx2
-        -mavx
-        -msse3
-        -msse
-        -mfma
-        -mf16c
+        -march=armv8-a
+        -mtune=cortex-a76
         -O3
         -DNDEBUG
         -DLM_GGML_USE_CPU
         -DLM_GGML_CPU_GENERIC
-        -DLM_GGML_USE_AVX2
-        -DLM_GGML_USE_AVX
-        -DLM_GGML_USE_SSE3
-        -DLM_GGML_USE_SSE
-        -DLM_GGML_USE_FMA
-        -DLM_GGML_USE_F16C
+        -ffast-math
+        -funroll-loops
     )
 
     target_link_libraries(${target_name} ${LOG_LIB})
     
-    # Set output name
+    # Set output name and directory
     set_target_properties(${target_name} PROPERTIES
-        OUTPUT_NAME "llama-cpp-x86_64"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/x86_64"
+        OUTPUT_NAME "llama-cpp-arm64"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/arm64-v8a"
     )
 endfunction()
 
-# Build x86_64 library for emulator
-build_library_x86_64(llama-cpp-x86_64)
+# Build ARM64 library for real devices
+build_library_arm64(llama-cpp-arm64)
 
 # Print build information
-message(STATUS "Building llama-cpp for Android x86_64 (emulator)")
+message(STATUS "Building llama-cpp for Android ARM64 (real devices)")
 message(STATUS "Source directory: ${LLAMACPP_LIB_DIR}")
-message(STATUS "Architecture: x86_64")
-message(STATUS "Optimizations: AVX2, AVX, SSE3, SSE, FMA, F16C")
-message(STATUS "Output directory: ${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/x86_64")
+message(STATUS "Architecture: ARM64 (arm64-v8a)")
+message(STATUS "Optimizations: ARMv8-A, Cortex-A76 tuning")
+message(STATUS "Output directory: ${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/arm64-v8a")

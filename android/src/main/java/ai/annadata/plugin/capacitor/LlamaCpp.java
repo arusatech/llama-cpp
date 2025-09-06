@@ -249,6 +249,12 @@ public class LlamaCpp {
     private int contextCounter = 0;
     private int contextLimit = 10;
     private boolean nativeLogEnabled = false;
+    private Context context;
+
+    // Constructor to receive context
+    public LlamaCpp(Context context) {
+        this.context = context;
+    }
 
     // Native method declarations
     private native long initContextNative(String modelPath, String[] searchPaths, JSObject params);
@@ -267,7 +273,7 @@ public class LlamaCpp {
 
     static {
         try {
-            System.loadLibrary("llama-cpp");
+            System.loadLibrary("llama-cpp-x86_64");
             Log.i(TAG, "Successfully loaded llama-cpp native library");
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "Failed to load llama-cpp native library: " + e.getMessage());
@@ -444,7 +450,7 @@ public class LlamaCpp {
 
         try {
             // Extract parameters
-            String modelPath = params.getString("model");
+            String modelPath = params.getString("modelPath", "");
             if (modelPath == null || modelPath.isEmpty()) {
                 callback.onResult(LlamaResult.failure(new LlamaError("Model path is required")));
                 return;
@@ -864,7 +870,6 @@ public class LlamaCpp {
 
     // Add this method to get proper storage paths
     private String[] getModelSearchPaths(String filename) {
-        Context context = getContext(); // You'll need to get context from the plugin
         String packageName = context.getPackageName();
         
         List<String> paths = new ArrayList<>();

@@ -9,16 +9,24 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.Map;
 import org.json.JSONException;
+import android.content.Context;
+import android.os.Environment;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.HashMap;
 
 @CapacitorPlugin(name = "LlamaCpp")
 public class LlamaCppPlugin extends Plugin {
     private static final String TAG = "LlamaCppPlugin";
 
-    private LlamaCpp implementation = new LlamaCpp();
+    private LlamaCpp implementation;
 
     @Override
     public void load() {
         super.load();
+        // Initialize implementation with context
+        implementation = new LlamaCpp(getContext());
         Log.i(TAG, "LlamaCppPlugin loaded successfully");
     }
 
