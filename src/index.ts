@@ -159,11 +159,16 @@ export class LlamaContext {
     filepath: string,
     options?: { tokenSize: number },
   ): Promise<number> {
-    return LlamaCpp.saveSession({ 
-      contextId: this.id, 
-      filepath, 
-      size: options?.tokenSize || -1 
+    const res: any = await LlamaCpp.saveSession({
+      contextId: this.id,
+      filepath,
+      size: options?.tokenSize || -1,
     });
+    if (typeof res === 'number') return res;
+    if (typeof res?.tokensSaved === 'number') return res.tokensSaved;
+    if (typeof res?.tokens_saved === 'number') return res.tokens_saved;
+    if (typeof res?.value === 'number') return res.value;
+    return 0;
   }
 
   isLlamaChatSupported(): boolean {
@@ -616,7 +621,10 @@ export function addNativeLogListener(
   logListeners.push(listener);
   return {
     remove: () => {
-      logListeners.splice(logListeners.indexOf(listener), 1);
+      const idx = logListeners.indexOf(listener);
+      if (idx >= 0) {
+        logListeners.splice(idx, 1);
+      }
     },
   };
 }
