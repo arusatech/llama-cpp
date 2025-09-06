@@ -548,7 +548,10 @@ public class LlamaCpp {
             // Extract parameters from JSObject
             String prompt = params.getString("prompt", "");
             int nPredict = params.getInteger("n_predict", 128);
-            float temperature = params.has("temp") ? (float) params.getDouble("temp") : 0.8f;
+            // Prefer 'temperature' key; fall back to legacy 'temp' if present
+            float temperature = params.has("temperature")
+                ? (float) params.getDouble("temperature")
+                : (params.has("temp") ? (float) params.getDouble("temp") : 0.8f);
             float topP = params.has("top_p") ? (float) params.getDouble("top_p") : 0.95f;
             int topK = params.getInteger("top_k", 40);
             float repeatPenalty = params.has("repeat_penalty") ? (float) params.getDouble("repeat_penalty") : 1.1f;

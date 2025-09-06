@@ -182,9 +182,9 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void loadSession(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        String path = call.getString("path", "");
+        String filepath = call.getString("filepath", "");
 
-        implementation.loadSession(contextId, path, result -> {
+        implementation.loadSession(contextId, filepath, result -> {
             if (result.isSuccess()) {
                 JSObject jsResult = new JSObject();
                 Map<String, Object> data = result.getData();
@@ -201,13 +201,14 @@ public class LlamaCppPlugin extends Plugin {
     @PluginMethod
     public void saveSession(PluginCall call) {
         int contextId = call.getInt("contextId", 0);
-        String path = call.getString("path", "");
+        String filepath = call.getString("filepath", "");
         int size = call.getInt("size", -1);
 
-        implementation.saveSession(contextId, path, size, result -> {
+        implementation.saveSession(contextId, filepath, size, result -> {
             if (result.isSuccess()) {
+                // Resolve as a single numeric value to align with TS API expecting number
                 JSObject ret = new JSObject();
-                ret.put("tokensSaved", result.getData());
+                ret.put("value", result.getData());
                 call.resolve(ret);
             } else {
                 call.reject(result.getError().getMessage());
