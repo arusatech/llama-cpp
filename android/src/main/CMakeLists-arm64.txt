@@ -101,7 +101,7 @@ function(build_library_arm64 target_name)
         -DNDEBUG
         -DLM_GGML_USE_CPU
         -DLM_GGML_CPU_GENERIC
-        -ffast-math
+        -fno-finite-math-only
         -funroll-loops
     )
 
