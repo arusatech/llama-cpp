@@ -2,6 +2,7 @@
  * Copy dist/wasm → annadata-app/public/llama-wasm and verify the JSPI shim patch.
  */
 import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 
@@ -86,6 +87,45 @@ if (!js.includes('jsModelVfsBegin')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing JS-side VFS streaming.\n` +
       `Run: npm run build:pwa:full`,
+  );
+  process.exit(1);
+}
+if (!js.includes('preferHeapFsVfs')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing preferHeapFsVfs (BGE embed HeapFS routing).\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+if (!js.includes('disableAsyncFileEnv')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing disableAsyncFileEnv (HeapFS fread guard).\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+if (mjs.includes('cap_wasm_set_use_async_file') && js.includes('const LLAMA_WASM_JSPI = false')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: WASM has async file bridge but llama_engine.js has LLAMA_WASM_JSPI=false.\n` +
+      `Run: LLAMA_WASM_JSPI=1 node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+if (!js.includes('wasmHasAsyncFileBridge')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing wasmHasAsyncFileBridge runtime probe.\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+const syntaxCheck = spawnSync(process.execPath, ['--check', resolve(destDir, 'llama_engine.js')], {
+  encoding: 'utf8',
+});
+if (syntaxCheck.status !== 0) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js failed node --check (invalid JS syntax).\n` +
+      (syntaxCheck.stderr || syntaxCheck.stdout || '') +
+      `\nRegenerate: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
   );
   process.exit(1);
 }

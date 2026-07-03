@@ -921,14 +921,25 @@ struct common_init_result common_init_from_params(common_params & params) {
     llama_context * lctx = llama_init_from_model(model, cparams);
     if (lctx == NULL) {
         LOG_ERR("%s: failed to create context with model '%s'\n", __func__, params.model.path.c_str());
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ common_init: llama_init_from_model failed (null ctx)\n");
+#endif
         llama_model_free(model);
         return iparams;
     }
+
+#ifdef __EMSCRIPTEN__
+    fprintf(stderr, "@@WASM_LOAD@@ common_init: llama_init_from_model ok\n");
+#endif
 
     if (params.ctx_shift && !llama_memory_can_shift(llama_get_memory(lctx))) {
         LOG_WRN("%s: KV cache shifting is not supported for this context, disabling KV cache shifting\n", __func__);
         params.ctx_shift = false;
     }
+
+#ifdef __EMSCRIPTEN__
+    fprintf(stderr, "@@WASM_LOAD@@ common_init: after ctx_shift\n");
+#endif
 
     if (!params.control_vectors.empty()) {
         if (params.control_vector_layer_start <= 0) params.control_vector_layer_start = 1;

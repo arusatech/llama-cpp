@@ -1545,6 +1545,9 @@ lm_ggml_backend_sched_t lm_ggml_backend_sched_new(
     LM_GGML_ASSERT(lm_ggml_backend_dev_type(lm_ggml_backend_get_device(backends[n_backends - 1])) == LM_GGML_BACKEND_DEVICE_TYPE_CPU);
 
     struct lm_ggml_backend_sched * sched = (lm_ggml_backend_sched *) calloc(1, sizeof(struct lm_ggml_backend_sched));
+    if (!sched) {
+        return nullptr;
+    }
 
     const char * LM_GGML_SCHED_DEBUG = getenv("LM_GGML_SCHED_DEBUG");
     sched->debug = LM_GGML_SCHED_DEBUG ? atoi(LM_GGML_SCHED_DEBUG) : 0;

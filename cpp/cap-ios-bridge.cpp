@@ -130,12 +130,15 @@ bool load_with_fallback(std::unique_ptr<capllama::llama_cap_context> & context, 
     try {
         if (context->loadModel(cparams)) {
 #ifdef __EMSCRIPTEN__
-            fprintf(stderr, "@@WASM_LOAD@@ phase=primary ok\n");
+            // P2: Enhanced phase marker with model path on success
+            fprintf(stderr, "@@WASM_LOAD@@ phase=primary ok model=%s n_ctx=%d n_batch=%d\n",
+                    cparams.model.path.c_str(), cparams.n_ctx, cparams.n_batch);
 #endif
             return true;
         }
 #ifdef __EMSCRIPTEN__
-        fprintf(stderr, "@@WASM_LOAD@@ phase=primary failed (loadModel returned false)\n");
+        // P2: Enhanced failure marker
+        fprintf(stderr, "@@WASM_LOAD@@ phase=primary failed (loadModel returned false) — check WASM memory\n");
 #endif
     } catch (const std::exception & e) {
         fprintf(stderr, "loadModel exception: %s\n", e.what());
@@ -154,7 +157,7 @@ bool load_with_fallback(std::unique_ptr<capllama::llama_cap_context> & context, 
 #ifdef __EMSCRIPTEN__
     // Primary already uses effectiveNctx clamps (n_ctx<=512, n_batch<=8 for large async models).
     // A second loadModel() on the same context wastes heap and confuses stderr ordering.
-    if (cparams.n_ctx <= 512 && cparams.n_batch <= 8) {
+    if (!cparams.embedding && cparams.n_ctx <= 512 && cparams.n_batch <= 8) {
         fprintf(stderr,
             "@@WASM_LOAD@@ skip fallback: params already at WASM minimum (n_ctx=%d n_batch=%d use_mmap=%d)\n",
             cparams.n_ctx, cparams.n_batch, cparams.use_mmap ? 1 : 0);
@@ -189,8 +192,8 @@ bool load_with_fallback(std::unique_ptr<capllama::llama_cap_context> & context, 
 #ifdef __EMSCRIPTEN__
     // Never fall back to use_mmap=false on WASM — copying a 700 MB GGUF OOMs.
     minimal.use_mmap = cparams.use_mmap;
-    minimal.n_ctx = 64;
-    minimal.n_batch = 32;
+    minimal.n_ctx = cparams.embedding ? 64 : 64;
+    minimal.n_batch = cparams.embedding ? 8 : 32;
     fprintf(stderr,
         "@@WASM_LOAD@@ phase=fallback begin n_ctx=%d n_batch=%d use_mmap=%d\n",
         minimal.n_ctx, minimal.n_batch, minimal.use_mmap ? 1 : 0);
@@ -432,11 +435,25 @@ int64_t llama_init_context(const char * model_path, const char * params_json) {
         // Non-pthread WASM: ggml-cpu lm_ggml_thread_create fails when n_threads > 1.
         cparams.cpuparams.n_threads = 1;
         cparams.cpuparams_batch.n_threads = 1;
-        if (cparams.n_batch > 16) {
-            cparams.n_batch = 16;
-        }
-        if (cparams.n_ctx > 512) {
-            cparams.n_ctx = 512;
+        if (cparams.embedding) {
+            // P1: Allow n_batch up to 64 if pre-set by host (WASM pre-grown for larger graph)
+            // If not set, default to 8 for memory safety on older WASM instances
+            if (cparams.n_batch > 64) {
+                cparams.n_batch = 64;
+            } else if (cparams.n_batch <= 0) {
+                cparams.n_batch = 8; // default
+            }
+            // Otherwise use whatever is set (including 64 from async mode)
+            if (cparams.n_ctx > 128) {
+                cparams.n_ctx = 128;
+            }
+        } else {
+            if (cparams.n_batch > 16) {
+                cparams.n_batch = 16;
+            }
+            if (cparams.n_ctx > 512) {
+                cparams.n_ctx = 512;
+            }
         }
 #endif
 

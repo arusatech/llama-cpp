@@ -1129,6 +1129,7 @@ bool llama_model_loader::load_all_data(
     // check if this is the last call and do final cleanup
     if (size_done >= size_data) {
         // unmap offloaded tensors and metadata
+#if !defined(__EMSCRIPTEN__)
         if (use_mmap) {
             for (uint32_t idx = 0; idx < mappings.size(); idx++) {
                 const auto & mmap_used = mmaps_used.at(idx);
@@ -1139,6 +1140,7 @@ bool llama_model_loader::load_all_data(
                 }
             }
         }
+#endif
         if (progress_callback) {
             // Even though the model is done loading, we still honor
             // cancellation since we need to free allocations.

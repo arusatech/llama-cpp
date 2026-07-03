@@ -319,6 +319,12 @@ struct llama_mmap::impl {
     }
 
     void unmap_fragment(size_t first, size_t last) {
+#if defined(__EMSCRIPTEN__)
+        // HeapFS / mmapAlloc regions are not real POSIX mappings — munmap EINVAL.
+        LM_GGML_UNUSED(first);
+        LM_GGML_UNUSED(last);
+        return;
+#endif
         int page_size = sysconf(_SC_PAGESIZE);
         align_range(&first, &last, page_size);
         size_t len = last - first;
@@ -355,11 +361,13 @@ struct llama_mmap::impl {
     }
 
     ~impl() {
+#if !defined(__EMSCRIPTEN__)
         for (const auto & frag : mapped_fragments) {
             if (munmap((char *) addr + frag.first, frag.second - frag.first)) {
                 LLAMA_LOG_WARN("warning: munmap failed: %s\n", strerror(errno));
             }
         }
+#endif
     }
 #elif defined(_WIN32)
     impl(struct llama_file * file, size_t prefetch, bool numa) {

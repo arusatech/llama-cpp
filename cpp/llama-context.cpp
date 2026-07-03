@@ -93,7 +93,7 @@ llama_context::llama_context(
     // this is required by GPU kernels in order to avoid out-of-bounds accesses (e.g. lm_ggml_flash_attn_ext)
     // ref: https://github.com/ggerganov/llama.cpp/pull/5021
     // TODO: this padding is not needed for the cache-less context so we should probably move it to llama_memory
-    if (cparams.n_batch < LM_GGML_KQ_MASK_PAD) {
+    if (cparams.causal_attn && cparams.n_batch < LM_GGML_KQ_MASK_PAD) {
         LLAMA_LOG_WARN("%s: n_batch is less than LM_GGML_KQ_MASK_PAD - increasing to %d\n", __func__, LM_GGML_KQ_MASK_PAD);
         cparams.n_batch = LM_GGML_KQ_MASK_PAD;
     }
@@ -241,8 +241,19 @@ llama_context::llama_context(
 
         LLAMA_LOG_DEBUG("%s: max_nodes = %zu\n", __func__, max_nodes);
 
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: gf_res_prev begin max_nodes=%zu\n", max_nodes);
+#endif
         gf_res_prev.reset(new llm_graph_result(max_nodes));
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: gf_res_prev ok\n");
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: gf_res_reserve begin\n");
+#endif
         gf_res_reserve.reset(new llm_graph_result(max_nodes));
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: gf_res_reserve ok\n");
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: sched_new begin\n");
+#endif
 
         // TODO: move these checks to lm_ggml_backend_sched
         // enabling pipeline parallelism in the scheduler increases memory usage, so it is only done when necessary
@@ -273,10 +284,17 @@ llama_context::llama_context(
         }
 
         sched.reset(lm_ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, pipeline_parallel, cparams.op_offload));
+        if (!sched) {
+            throw std::runtime_error("failed to create backend scheduler (out of memory?)");
+        }
 
         if (pipeline_parallel) {
             LLAMA_LOG_INFO("%s: pipeline parallelism enabled (n_copies=%d)\n", __func__, lm_ggml_backend_sched_get_n_copies(sched.get()));
         }
+
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_context: sched_new ok\n");
+#endif
     }
 
     // reserve worst-case graph
@@ -358,6 +376,11 @@ llama_context::llama_context(
             LLAMA_LOG_INFO("%s: graph splits = %d (with bs=%d), %d (with bs=1)\n", __func__, n_splits_pp, n_tokens, n_splits_tg);
         }
     }
+
+#ifdef __EMSCRIPTEN__
+    fprintf(stderr, "@@WASM_LOAD@@ llama_context: ctor done memory=%d vocab_only=%d\n",
+            memory ? 1 : 0, hparams.vocab_only ? 1 : 0);
+#endif
 }
 
 llama_context::~llama_context() {
@@ -1336,6 +1359,12 @@ void llama_context::output_reorder() {
 //
 
 uint32_t llama_context::graph_max_nodes() const {
+#ifdef __EMSCRIPTEN__
+    // Small cache-less embed graphs (BERT) need fewer scheduler nodes; lowers peak WASM heap.
+    if (cparams.embeddings) {
+        return std::max<uint32_t>(512u, 4u * model.n_tensors());
+    }
+#endif
     return std::max<uint32_t>(1024u, 8u*model.n_tensors());
 }
 
@@ -2284,11 +2313,20 @@ llama_context * llama_init_from_model(
 
     try {
         auto * ctx = new llama_context(*model, params);
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_init_from_model: returned ctx=%p\n", (void *) ctx);
+#endif
         return ctx;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to initialize the context: %s\n", __func__, err.what());
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_LOAD@@ llama_init_from_model: exception %s\n", err.what());
+#endif
     }
 
+#ifdef __EMSCRIPTEN__
+    fprintf(stderr, "@@WASM_LOAD@@ llama_init_from_model: failed (null ctx)\n");
+#endif
     return nullptr;
 }
 

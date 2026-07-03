@@ -148,6 +148,17 @@
   "eslintConfig": {
     "extends": "@ionic/eslint-config/recommended"
   },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/test"],
+    "testMatch": ["**/*.test.ts"],
+    "moduleFileExtensions": ["ts", "js", "json"],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts"
+    ]
+  },
   "capacitor": {
     "ios": {
       "src": "ios"

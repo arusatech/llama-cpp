@@ -30,7 +30,6 @@ import { resolve } from 'node:path';
 const root        = resolve(process.cwd());
 const engineName  = 'llama_engine';
 const wasmPkgDir  = resolve(root, 'src-rust', 'pkg');
-const BUILD_JSPI  = process.env.LLAMA_WASM_JSPI === '1';
 const BUILD_PTHREAD = process.env.LLAMA_WASM_PTHREAD === '1';
 
 // ── Inputs (produced by Stage 4 emcc MAIN_MODULE link) ─────────────────────
@@ -58,6 +57,22 @@ const requireFile = async (path, label) => {
 // ── 1. Verify emcc outputs exist ─────────────────────────────────────────────
 await requireFile(emscriptenMjs,  'emcc ESM runtime (llama_engine_emscripten.mjs)');
 await requireFile(emscriptenWasm, 'emcc wasm binary (llama_engine_emscripten.wasm)');
+
+const emscriptenMjsProbe = await readFile(emscriptenMjs, 'utf8');
+const WASM_HAS_ASYNC_FILE = emscriptenMjsProbe.includes('cap_wasm_set_use_async_file');
+const BUILD_JSPI =
+  process.env.LLAMA_WASM_JSPI === '1' ||
+  (process.env.LLAMA_WASM_JSPI !== '0' && WASM_HAS_ASYNC_FILE);
+if (WASM_HAS_ASYNC_FILE && process.env.LLAMA_WASM_JSPI !== '1') {
+  console.log(
+    '[package-embed-wasm] Auto-detected cap_wasm async file bridge in emscripten → LLAMA_WASM_JSPI=true',
+  );
+}
+if (process.env.LLAMA_WASM_JSPI === '0' && WASM_HAS_ASYNC_FILE) {
+  console.log(
+    '[package-embed-wasm] WARN: LLAMA_WASM_JSPI=0 but WASM exports cap_wasm_set_use_async_file — enabling async file shim',
+  );
+}
 
 const emscriptenWasmBuf   = await readFile(emscriptenWasm);
 const emscriptenWasmBytes = emscriptenWasmBuf.byteLength;
@@ -200,8 +215,20 @@ if (LLAMA_WASM_JSPI && typeof WebAssembly !== 'undefined' && !WebAssembly.Suspen
   };
 }
 
+function wasmHasAsyncFileBridge(mod) {
+  if (!mod) return false;
+  if (typeof mod._cap_wasm_set_use_async_file === 'function') return true;
+  try {
+    if (typeof mod.cwrap === 'function') {
+      return typeof mod.cwrap('cap_wasm_set_use_async_file', null, ['number']) === 'function';
+    }
+  } catch (_) {}
+  return false;
+}
+
 /** External file read (OPFS/JS handler → sync fread hook). Does not require native JSPI. */
 export function can_use_async_file() {
+  if (_mod && wasmHasAsyncFileBridge(_mod)) return true;
   return LLAMA_WASM_JSPI;
 }
 
@@ -874,6 +901,19 @@ function enableAsyncFileEnv() {
   } catch (_) {}
 }
 
+function disableAsyncFileEnv() {
+  if (!_mod) return;
+  if (_mod.ENV) delete _mod.ENV['USE_ASYNC_FILE'];
+  try {
+    if (typeof _mod._cap_wasm_set_use_async_file === 'function') {
+      _mod._cap_wasm_set_use_async_file(0);
+    } else if (typeof _mod.cwrap === 'function') {
+      const setFn = _mod.cwrap('cap_wasm_set_use_async_file', null, ['number']);
+      if (typeof setFn === 'function') setFn(0);
+    }
+  } catch (_) {}
+}
+
 function installAsyncFileBridge(mod) {
   const bridge = (path, offset, req_size, out_ptr) => {
     const name = stripModelsPrefix(path);
@@ -931,8 +971,33 @@ function asyncFileRelease(vfs_path) {
  */
 export function async_model_bind(vfs_path, size_bytes, readFn) {
   if (!_mod) throw new Error('llama_engine not ready — await init() first');
+  const entry = _jsVfsStreams.get(vfs_path);
+  if (entry?.mode === 'heapfs') {
+    if (!(size_bytes > 0)) {
+      throw new Error('async_model_bind(heapfs): size_bytes must be positive');
+    }
+    const CHUNK = 1024 * 1024;
+    for (let off = 0; off < size_bytes; off += CHUNK) {
+      const raw = readFn(off, Math.min(CHUNK, size_bytes - off));
+      if (raw != null && typeof raw.then === 'function') {
+        throw new Error('async_model_bind readFn must be synchronous (use OPFS SyncAccessHandle)');
+      }
+      const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      heapfsWrite(entry.heapId, bytes, off);
+    }
+    entry.bound = true;
+    if (typeof console !== 'undefined') {
+      console.error(
+        '[llama-wasm] heapfs_model_bind: copied modelMB=' + (size_bytes / 1048576).toFixed(1) +
+        ' wasmMB=' + wasmLinearMb() + ' (use_mmap=true zero-copy tensors)',
+      );
+    }
+    return;
+  }
   if (!can_use_async_file()) {
-    throw new Error('async_model_bind requires JSPI build + crossOriginIsolated (COOP/COEP)');
+    throw new Error(
+      'async_model_bind requires cap_wasm async file bridge — rebuild with npm run build:wasm',
+    );
   }
   asyncFileRegister(vfs_path, size_bytes, readFn);
   try {
@@ -1191,8 +1256,12 @@ function resolveLoadContextFromPathFn() {
 }
 
 /** Load via C bridge (avoids bindgen throw on trap) + register context in Rust. */
-function wasmLoadContextFromPath(model_id, vfs_path, opts_json) {
-  enableAsyncFileEnv();
+function wasmLoadContextFromPath(model_id, vfs_path, opts_json, mode) {
+  if (mode === 'async') {
+    enableAsyncFileEnv();
+  } else {
+    disableAsyncFileEnv();
+  }
   const loadFn = resolveLoadContextFromPathFn();
   if (typeof console !== 'undefined') {
     console.error('[llama-wasm] cwrap load: path=' + vfs_path + ' wasmMB=' + wasmLinearMb());
@@ -1287,26 +1356,40 @@ function loadOptsForMemory(opts_json, mode, modelBytes) {
     n_ctx: typeof opts.n_ctx === 'number' && opts.n_ctx > 0
       ? opts.n_ctx
       : effectiveNctx(modelBytes, opts_json),
-    n_batch: typeof opts.n_batch === 'number' && opts.n_batch > 0 ? opts.n_batch : 16,
+    n_batch: typeof opts.n_batch === 'number' && opts.n_batch > 0
+      ? opts.n_batch
+      : (opts.embedding === true || opts.embedding === 'true')
+        ? (mode === 'async' ? 64 : 8)
+        : 16,
     embedding: opts.embedding === true || opts.embedding === 'true',
   };
 }
 
 /** Estimate WASM bytes for one model (weights + COPY path + KV/context headroom). */
-function estimateModelWasmFootprint(fileBytes, memOpts = {}) {
+function estimateModelWasmFootprint(fileBytes, memOpts = {}, mode) {
   if (!(fileBytes > 0)) return 20 * 1024 * 1024;
   const embedding = memOpts.embedding === true;
+  const heapfsMmap = mode === 'heapfs' && embedding;
+  const heapfsCopy = (mode === 'heapfs' && !embedding) || (mode !== 'async' && embedding && mode !== 'heapfs');
   const n_ctx = typeof memOpts.n_ctx === 'number' && memOpts.n_ctx > 0
     ? memOpts.n_ctx
-    : embedding ? 256 : 512;
+    : embedding ? 128 : 512;
   const n_batch = typeof memOpts.n_batch === 'number' && memOpts.n_batch > 0
     ? memOpts.n_batch
-    : embedding ? 32 : 16;
-  const weightMultiplier = embedding ? 1.25 : fileBytes > 200 * 1024 * 1024 ? 1.32 : 1.2;
-  const ctxBytes = n_ctx * n_batch * 4096;
-  const proportional = Math.ceil(fileBytes * 0.12);
-  const minHeadroom = embedding ? 48 * 1024 * 1024 : WASM_MIN_HEADROOM_BYTES;
-  const headroom = Math.max(minHeadroom, proportional, ctxBytes);
+    : embedding ? 8 : 16;
+  // Async OPFS (use_mmap=false) and HeapFS COPY duplicate weights during tensor init (~2× file size).
+  const weightMultiplier = embedding
+    ? (heapfsMmap ? 1.15 : heapfsCopy ? 2.2 : 2.0)
+    : fileBytes > 200 * 1024 * 1024 ? 1.32 : 1.2;
+  // llama_context bumps n_batch to LM_GGML_KQ_MASK_PAD (64) only for causal models.
+  const effectiveBatch = embedding && mode === 'async' ? Math.max(n_batch, 64) : n_batch;
+  const ctxBytes = n_ctx * effectiveBatch * 4096;
+  const graphReserve = embedding
+    ? (heapfsMmap ? 64 * 1024 * 1024 : heapfsCopy ? 48 * 1024 * 1024 : (mode === 'async' ? 96 * 1024 * 1024 : 32 * 1024 * 1024))
+    : 0;
+  const proportional = Math.ceil(fileBytes * (embedding ? 0.25 : 0.12));
+  const minHeadroom = embedding ? 72 * 1024 * 1024 : WASM_MIN_HEADROOM_BYTES;
+  const headroom = Math.max(minHeadroom, proportional, ctxBytes) + graphReserve;
   return Math.ceil(fileBytes * weightMultiplier + headroom);
 }
 
@@ -1392,13 +1475,26 @@ function ensureWasmMemoryHeadroom(modelBytes, opts_json, mode, model_id) {
   const current = _mod.HEAPU8?.length ?? _mod.wasmMemory?.buffer?.byteLength ?? 0;
   const memOpts = loadOptsForMemory(opts_json, mode, modelBytes);
   const modelsBytes = totalLoadedModelBytes() + modelBytes;
+  const estimate = estimateModelWasmFootprint(modelBytes, memOpts, mode);
   const warmHeap = current > 64 * 1024 * 1024;
   let target;
-  if (warmHeap || _loadedModelBytes.size > 0) {
-    const estimate = estimateModelWasmFootprint(modelBytes, memOpts);
+  if (memOpts.embedding) {
+    // Embed graph + sched reserve — budget extra headroom; heapfs mmap still needs graph slack.
+    const graphSlack = mode === 'heapfs'
+      ? 128 * 1024 * 1024
+      : mode === 'async'
+        ? 128 * 1024 * 1024
+        : 48 * 1024 * 1024;
+    const embedFloor = mode === 'heapfs' ? 256 * 1024 * 1024 : 224 * 1024 * 1024;
+    target = Math.min(Math.max(current, estimate + graphSlack, embedFloor), WASM_MAX_BYTES);
+  } else if (warmHeap || _loadedModelBytes.size > 0) {
     if (_loadedModelBytes.size > 0) {
       // Second+ resident model — incremental footprint plus COPY tensor headroom (use_mmap=0).
-      const copyHeadroom = Math.max(32 * 1024 * 1024, Math.ceil(modelBytes * 1.5));
+      const memOpts = loadOptsForMemory(opts_json, mode, modelBytes);
+      const embedCopy = memOpts.embedding
+        ? Math.max(96 * 1024 * 1024, Math.ceil(modelBytes * 3))
+        : Math.max(32 * 1024 * 1024, Math.ceil(modelBytes * 1.5));
+      const copyHeadroom = embedCopy;
       target = Math.min(current + estimate + copyHeadroom, WASM_MAX_BYTES);
     } else {
       // Async stream begin may have pre-grown; do not add estimate again.
@@ -1458,7 +1554,8 @@ function asyncFileStreamBegin(totalBytes, opts_json) {
   patchHeapFS();
   enableAsyncFileEnv();
   if (typeof totalBytes === 'number' && totalBytes > 0) {
-    ensureWasmMemoryHeadroom(totalBytes, opts_json ?? '{}', 'async');
+    const loadOpts = vfsLoadOptsJson(opts_json ?? '{}', 'async', totalBytes);
+    ensureWasmMemoryHeadroom(totalBytes, loadOpts, 'async');
   }
   const basename = 'wasm_async_' + (_jsVfsCounter++) + '.gguf';
   const path = '/models/' + basename;
@@ -1473,7 +1570,33 @@ function asyncFileStreamBegin(totalBytes, opts_json) {
   return path;
 }
 
+function vfsOptsEmbedding(opts_json) {
+  try {
+    const o = JSON.parse(opts_json || '{}');
+    return o.embedding === true || o.embedding === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Small embed (≤32MB): HeapFS + use_mmap zero-copy; larger embed falls back to async OPFS fread. */
+const EMBED_HEAPFS_MAX_BYTES = 32 * 1024 * 1024;
+
+function preferHeapFsVfs(totalBytes, opts_json) {
+  if (!supportsHeapFS() || !(totalBytes > 0)) return false;
+  if (vfsOptsEmbedding(opts_json)) {
+    if (totalBytes <= EMBED_HEAPFS_MAX_BYTES) return true;
+    if (can_use_async_file()) return false;
+    return true;
+  }
+  if (totalBytes < 100 * 1024 * 1024) return true;
+  return false;
+}
+
 function jsModelVfsBegin(totalBytes, opts_json) {
+  if (preferHeapFsVfs(totalBytes, opts_json)) {
+    return heapfsStreamBegin(totalBytes, opts_json);
+  }
   if (can_use_async_file() && typeof totalBytes === 'number' && totalBytes > 0) {
     return asyncFileStreamBegin(totalBytes, opts_json);
   }
@@ -1542,11 +1665,21 @@ function vfsLoadOptsJson(opts_json, mode, modelBytes) {
   opts.n_threads = 1;
   const embedding = opts.embedding === true || opts.embedding === 'true';
   if (embedding) {
-    if (opts.n_ctx == null || opts.n_ctx > 256) {
-      opts.n_ctx = 256;
+    if (opts.n_ctx == null || opts.n_ctx > 128) {
+      opts.n_ctx = 128;
     }
-    if (opts.n_batch == null || opts.n_batch > 32) {
-      opts.n_batch = 32;
+    if (mode === 'async') {
+      if (opts.n_batch == null || opts.n_batch > 64) {
+        opts.n_batch = 64;
+      }
+    } else if (mode === 'heapfs') {
+      if (opts.n_batch == null || opts.n_batch > 8) {
+        opts.n_batch = 8;
+      }
+    } else {
+      if (opts.n_batch == null || opts.n_batch > 8) {
+        opts.n_batch = 8;
+      }
     }
   } else if (modelBytes < 100 * 1024 * 1024) {
     if (opts.n_ctx == null || opts.n_ctx > 256) {
@@ -1557,26 +1690,31 @@ function vfsLoadOptsJson(opts_json, mode, modelBytes) {
     }
   }
   if (mode === 'heapfs') {
-    opts.use_mmap = true;
-    opts.n_ctx = effectiveNctx(modelBytes, opts_json);
-    if (opts.n_batch == null || opts.n_batch > 128) {
-      opts.n_batch = 128;
+    // Small embed: GGUF lives in mmapAlloc heap — buffer_from_host_ptr avoids a second COPY.
+    opts.use_mmap = embedding;
+    if (!embedding) {
+      opts.n_ctx = effectiveNctx(modelBytes, opts_json);
+      if (opts.n_batch == null || opts.n_batch > 128) {
+        opts.n_batch = 128;
+      }
     }
     if (modelBytes > 600 * 1024 * 1024 && (opts.n_batch == null || opts.n_batch > 64)) {
       opts.n_batch = 64;
     }
   } else if (mode === 'async') {
     opts.use_mmap = false;
-    opts.n_ctx = effectiveNctx(modelBytes, opts_json);
+    if (!embedding) {
+      opts.n_ctx = effectiveNctx(modelBytes, opts_json);
+    }
     if (modelBytes > 600 * 1024 * 1024) {
       // 65536 vocab × n_batch logits buffer — keep small at 2GB heap after full weight copy.
       if (opts.n_batch == null || opts.n_batch > 16) {
         opts.n_batch = 16;
       }
-    } else if (opts.n_batch == null || opts.n_batch > 128) {
+    } else if (!embedding && (opts.n_batch == null || opts.n_batch > 128)) {
       opts.n_batch = 128;
     }
-    if (modelBytes > 500 * 1024 * 1024 && modelBytes <= 600 * 1024 * 1024 &&
+    if (!embedding && modelBytes > 500 * 1024 * 1024 && modelBytes <= 600 * 1024 * 1024 &&
         (opts.n_batch == null || opts.n_batch > 64)) {
       opts.n_batch = 64;
     }
@@ -1648,12 +1786,30 @@ export function load_model_from_vfs(model_id, vfs_path, opts_json) {
       heapfsFinalizeForLoad(vfs_path, entry.basename, bytes);
     } else if (mode === 'async') {
       enableAsyncFileEnv();
-      // Heap pre-grown in asyncFileStreamBegin — skip second headroom pass.
+      // asyncFileStreamBegin grows for cold load; re-run when another model is already resident.
+      if (_loadedModelBytes.size > 0) {
+        ensureWasmMemoryHeadroom(bytes, loadOpts, 'async', model_id);
+      }
     } else {
       ensureWasmMemoryHeadroom(bytes, loadOpts, 'memfs', model_id);
     }
     _linearAtLoadStart.set(String(model_id), wasmLinearBytesNow());
-    wasmLoadContextFromPath(model_id, vfs_path, loadOpts);
+    // COPY tensor path + llm_graph_result reserve can exceed pre-stream grow — top up before cwrap.
+    const embedLoad = vfsOptsEmbedding(loadOpts);
+    if (mode === 'heapfs' || mode === 'memfs' || (mode === 'async' && embedLoad)) {
+      ensureWasmMemoryHeadroom(bytes, loadOpts, mode, model_id);
+    }
+    // P2 diagnostics: Log memory state before and after load
+    if (embedLoad && (mode === 'async' || mode === 'heapfs')) {
+      console.error('[llama-wasm] P2-diag: pre-tensor wasmMB=' + wasmLinearMb() + ' model=' + model_id + ' mode=' + mode);
+    }
+
+    wasmLoadContextFromPath(model_id, vfs_path, loadOpts, mode);
+
+    if (embedLoad && (mode === 'async' || mode === 'heapfs')) {
+      console.error('[llama-wasm] P2-diag: post-load wasmMB=' + wasmLinearMb() + ' model=' + model_id + ' mode=' + mode);
+    }
+    
     _loadedModelBytes.set(String(model_id), bytes);
     try {
       _loadedModelOpts.set(String(model_id), JSON.parse(loadOpts || '{}'));
@@ -1671,6 +1827,20 @@ export function load_model_from_vfs(model_id, vfs_path, opts_json) {
       _loadedAsyncModels.set(model_id, vfs_path);
     }
   } catch (err) {
+    // P2: Capture comprehensive diagnostics on error
+    const wasmMbAfterFail = wasmLinearMb();
+    const stderrTail = tailWasmStderr(1200); // capture last 1200 chars of stderr
+    const errorMsg = '[llama-wasm] load_model_from_vfs FAILED: model=' + model_id +
+      ' mode=' + mode + ' wasmMbAfterFail=' + wasmMbAfterFail +
+      ' err=' + (err instanceof Error ? err.message : String(err));
+    
+    if (typeof console !== 'undefined') {
+      console.error(errorMsg);
+      if (stderrTail) {
+        console.error('[llama-wasm] stderr tail (last 1200 chars):\\n' + stderrTail);
+      }
+    }
+    
     if (mode === 'heapfs') {
       heapfsReleaseEntry(vfs_path, entry);
     } else if (mode === 'async') {
