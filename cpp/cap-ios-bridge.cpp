@@ -28,6 +28,9 @@ bool capllama_verbose = false;
 
 extern "C" void llama_embedding_register_context(int64_t contextId, void * contextPtr);
 extern "C" void llama_embedding_unregister_context(int64_t contextId);
+#ifdef CAPLLAMA_BUILD_WASM
+extern "C" void cap_wasm_ensure_tmp_dir(void);
+#endif
 
 namespace {
 
@@ -1046,7 +1049,6 @@ static std::string resolve_vfs_path(const char * path) {
         return primary;
     }
 #ifdef CAPLLAMA_BUILD_WASM
-    extern "C" void cap_wasm_ensure_tmp_dir(void);
     cap_wasm_ensure_tmp_dir();
     return std::string("/tmp/") + std::filesystem::path(primary).filename().string();
 #else

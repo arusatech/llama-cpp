@@ -68,13 +68,14 @@ npm publish
 | **PWA/WASM** | Optional | Optional | Optional | ✗ | ✗ | ✅ |
 | **Use Case** | Public npm | Rebuild flexibility | Local dev | iOS apps | Android apps | ❌ Never |
 
-### 1. Minimal Variant (20 MB) ⭐ RECOMMENDED
+### 1. Minimal Variant (20-25 MB) ⭐ RECOMMENDED
 
 **Best for:** Production npm releases
 
 **Contents:**
 - iOS framework: arm64 only, debug symbols stripped
 - Android .so: arm64-v8a only, stripped
+- **WASM files** for web/PWA (automatic)
 - JavaScript/TypeScript dist files
 - **No** C++ sources
 - **No** debug symbols
@@ -87,18 +88,20 @@ npm publish
 **Size breakdown:**
 - iOS framework (arm64, stripped): ~3-4 MB
 - Android .so (arm64, stripped): ~15-16 MB
+- WASM + PWA assets: ~2-3 MB (automatic)
 - JS/TS dist: ~1-2 MB
-- Total: **~20 MB**
+- Total: **~23-25 MB**
 
 ---
 
-### 2. Core Variant (30-35 MB)
+### 2. Core Variant (33-40 MB)
 
 **Best for:** Production with rebuild capability
 
 **Contents:**
 - iOS framework: arm64 only, stripped
 - Android .so: arm64-v8a only, stripped
+- **WASM files** for web/PWA (automatic)
 - **WITH** C++ sources for rebuild
 - JavaScript/TypeScript dist files
 
@@ -110,17 +113,19 @@ npm publish
 **When to use:**
 - When users might need to rebuild with custom options
 - Production releases where flexibility matters
+- Complete web support with WASM
 - Good balance between size and functionality
 
 ---
 
-### 3. Development Variant (50-60 MB)
+### 3. Development Variant (55-70 MB)
 
 **Best for:** Local development and testing
 
 **Contents:**
 - iOS: arm64 + x86_64, **with** debug symbols
 - Android: arm64-v8a + x86_64, **with** debug symbols
+- **WASM files** for web/PWA (automatic)
 - C++ sources
 - All debug information
 

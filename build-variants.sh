@@ -335,7 +335,7 @@ build_minimal() {
 
 build_core() {
     print_header "Building CORE Variant (~30-35 MB)"
-    print_status "Contents: iOS arm64 + Android arm64, stripped, with C++ sources"
+    print_status "Contents: iOS arm64 + Android arm64, stripped, with C++ sources + PWA/WASM"
     
     # Clean previous builds
     rm -rf ios/build ios/Frameworks android/build
@@ -350,6 +350,9 @@ build_core() {
         build_android "arm64" "false" || print_warning "Android build skipped"
     fi
     
+    # Build PWA/WASM
+    build_pwa || print_warning "PWA build skipped"
+    
     # Keep C++ sources
     print_status "C++ sources included for flexibility"
     
@@ -358,7 +361,7 @@ build_core() {
 
 build_development() {
     print_header "Building DEVELOPMENT Variant (~50-60 MB)"
-    print_status "Contents: iOS (arm64+x86_64) + Android (arm64+x86_64), WITH debug symbols"
+    print_status "Contents: iOS (arm64+x86_64) + Android (arm64+x86_64) + PWA/WASM, WITH debug symbols"
     
     # Clean previous builds
     rm -rf ios/build ios/Frameworks android/build
@@ -372,6 +375,9 @@ build_development() {
     if check_android_sdk; then
         build_android "arm64 x86_64" "true" || print_warning "Android build skipped"
     fi
+    
+    # Build PWA/WASM
+    build_pwa || print_warning "PWA build skipped"
     
     # Keep everything
     print_status "Full sources and debug symbols included for development"
@@ -418,7 +424,7 @@ build_android_only() {
 build_full() {
     print_header "Building FULL Variant (~70+ MB)"
     print_warning "Full builds are NOT recommended for production!"
-    print_status "Contents: Everything, all architectures, debug symbols"
+    print_status "Contents: Everything, all architectures, debug symbols, PWA/WASM"
     
     # Clean previous builds
     rm -rf ios/build ios/Frameworks android/build
@@ -432,6 +438,9 @@ build_full() {
     if check_android_sdk; then
         build_android "arm64 x86_64" "true" || print_warning "Android build skipped"
     fi
+    
+    # Build PWA/WASM
+    build_pwa || print_warning "PWA build skipped"
     
     print_warning "Full variant ready (NOT recommended for production)"
 }

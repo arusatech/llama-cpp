@@ -34,7 +34,9 @@ npm publish
 6. Packages everything
 7. Publishes to npm
 
-**Result:** Users get iOS + Android + PWA (~35-40 MB) ✅
+**Result:** Users get iOS + Android + PWA + WASM (~35-40 MB) ✅
+
+**Note:** The `./build-variants.sh --variant minimal` command attempts to build PWA/WASM, but this step may be optional and can fail gracefully.
 
 ### Manual Build Steps
 
@@ -42,21 +44,26 @@ npm publish
 # 1. Clean previous builds
 npm run clean:native
 
-# 2. Build minimal variant (20 MB, production)
+# 2. Build minimal variant (iOS + Android only)
 ./build-variants.sh --variant minimal
 
 # 3. Build TypeScript
 npm run build
 
-# 4. Verify artifacts
+# 4. Build PWA/WASM separately (if needed)
+npm run build:pwa
+
+# 5. Verify artifacts
 npm run verify:pack:artifacts
 
-# 5. Check size
+# 6. Check size
 npm pack --dry-run
 
-# 6. Publish
+# 7. Publish
 npm publish
 ```
+
+**Note:** If you want PWA/WASM included, build it separately after the variant build.
 
 ### For Development Only
 
@@ -72,14 +79,20 @@ npm run build
 
 ### 6 Optimized Variants
 
-| Variant | Size | iOS | Android | Sources | Debug | Best For |
-|---------|------|-----|---------|---------|-------|----------|
-| **minimal** ⭐ | ~20 MB | arm64 stripped | arm64 stripped | ❌ | ❌ | Public npm (default) |
-| **core** | ~30-35 MB | arm64 stripped | arm64 stripped | ✅ | ❌ | Production + rebuild |
-| **development** | ~50-60 MB | arm64+x86_64 | arm64+x86_64 | ✅ | ✅ | Local dev/testing |
-| **ios-only** | ~8-10 MB | arm64 stripped | ❌ | ✅ | ❌ | iOS only |
-| **android-only** | ~25-30 MB | ❌ | arm64 stripped | ✅ | ❌ | Android only |
-| **full** | ~70+ MB | All | All | ✅ | ✅ | ❌ Not recommended |
+| Variant | Size | iOS | Android | Sources | Debug | PWA/WASM | Best For |
+|---------|------|-----|---------|---------|-------|----------|----------|
+| **minimal** ⭐ | ~20-23 MB | arm64 stripped | arm64 stripped | ❌ | ❌ | ✅ Included* | Public npm (default) |
+| **core** | ~33-40 MB | arm64 stripped | arm64 stripped | ✅ | ❌ | ✅ Included* | Production + rebuild |
+| **development** | ~55-70 MB | arm64+x86_64 | arm64+x86_64 | ✅ | ✅ | ✅ Included* | Local dev/testing |
+| **ios-only** | ~8-10 MB | arm64 stripped | ❌ | ✅ | ❌ | ❌ Not included | iOS only |
+| **android-only** | ~25-30 MB | ❌ | arm64 stripped | ✅ | ❌ | ❌ Not included | Android only |
+| **full** | ~75+ MB | All | All | ✅ | ✅ | ✅ Included* | ❌ Not recommended |
+
+**PWA/WASM Status:**
+- ✅ **minimal, core, development, full**: Attempt to build PWA/WASM automatically (optional, may fail gracefully)
+- ❌ **ios-only, android-only**: PWA/WASM not included (platform-specific builds)
+
+*Size estimates include optional PWA/WASM if build succeeds. Without PWA, subtract 2-3 MB.
 
 ### Build Any Variant
 
@@ -91,63 +104,90 @@ npm run build
 
 **When to use:** Public npm release, app stores, production deployments
 
+**What it builds:**
+- ✅ iOS arm64 (stripped)
+- ✅ Android arm64 (stripped)
+- ✅ PWA/WASM assets (automatic, optional)
+- ❌ NO C++ sources
+
 **Contents:**
 - iOS framework: arm64 only, debug symbols stripped (~3-4 MB)
 - Android .so: arm64-v8a only, stripped (~15-16 MB)
-- JavaScript/TypeScript dist
+- JavaScript/TypeScript dist (~1-2 MB)
+- PWA/WASM assets (~2-3 MB if successful)
 - **NO** C++ sources
 - **NO** debug symbols
 
 **Size breakdown:**
 ```
-iOS arm64 (stripped):   3-4 MB
-Android arm64 (stripped): 15-16 MB
-JS/TS dist:            1-2 MB
+iOS arm64 (stripped):      3-4 MB
+Android arm64 (stripped):  15-16 MB
+WASM + PWA assets:         2-3 MB (automatic)
+JS/TS dist:               1-2 MB
 ────────────────────
-Total:                 ~20 MB
+Total:                     ~23-25 MB
 ```
 
 **Build:**
 ```bash
 ./build-variants.sh --variant minimal
+# PWA/WASM is automatically attempted (may fail - that's OK)
 ```
 
 ### Core Variant (Balanced)
 
 **When to use:** Production with flexibility for users who need to rebuild
 
+**What it builds:**
+- ✅ iOS arm64 (stripped)
+- ✅ Android arm64 (stripped)
+- ✅ PWA/WASM assets (automatic, optional)
+- ✅ C++ sources included
+
 **Contents:**
-- iOS framework: arm64 only, stripped
-- Android .so: arm64-v8a only, stripped
+- iOS framework: arm64 only, stripped (~3-4 MB)
+- Android .so: arm64-v8a only, stripped (~15-16 MB)
 - **WITH** C++ sources (~13 MB)
-- JavaScript/TypeScript dist
+- JavaScript/TypeScript dist (~1-2 MB)
+- PWA/WASM assets (~2-3 MB if successful)
 
 **Benefits:**
 - Users can rebuild with custom options
-- Good balance: small-ish but flexible
+- Complete web support with WASM
+- Good balance: comprehensive but not huge
 
-**Size:** ~30-35 MB
+**Size:** ~33-40 MB (including automatic PWA/WASM attempt)
 
+**Build:**
 ```bash
 ./build-variants.sh --variant core
+# PWA/WASM is automatically attempted (may fail - that's OK)
 ```
 
 ### Development Variant
 
 **When to use:** Local development, CI/CD testing, debugging
 
+**What it builds:**
+- ✅ iOS arm64+x86_64 (WITH debug symbols)
+- ✅ Android arm64+x86_64 (WITH debug symbols)
+- ✅ PWA/WASM assets (automatic, optional)
+- ✅ C++ sources included
+
 **Contents:**
-- iOS: arm64 + x86_64, WITH debug symbols
-- Android: arm64-v8a + x86_64, WITH debug symbols
+- iOS: arm64 + x86_64, **with** debug symbols
+- Android: arm64-v8a + x86_64, **with** debug symbols
 - C++ sources
+- PWA/WASM assets (~2-3 MB if successful)
 - All debug information
 
 **Important:** NOT for public release
 
-**Size:** ~50-60 MB
+**Size:** ~55-70 MB (including automatic PWA/WASM attempt)
 
 ```bash
 ./build-variants.sh --variant development
+# PWA/WASM is automatically attempted (may fail - that's OK)
 ```
 
 ### Platform-Specific Variants
@@ -569,7 +609,9 @@ iOS framework (arm64, stripped):    3-4 MB
 Android library (arm64, stripped):  15-16 MB
 JS/TS + metadata:                   1-2 MB
 ───────────────────────────────────────
-Total:                              ~20 MB
+Total (without PWA):                ~20 MB
+
+With optional PWA/WASM:             ~23-25 MB
 ```
 
 ### Achievement: **71% Reduction** ✅
