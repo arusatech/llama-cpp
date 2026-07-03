@@ -203,8 +203,11 @@ struct MinjaCaps {
     private var nativeContexts: [Int64: UnsafeMutableRawPointer] = [:]
     private var contextIdToNative: [Int: Int64] = [:]
     private var contextCounter: Int = 0
-    private var contextLimit: Int = 10
+    // Default aligned with the isomorphic limit (parity with WASM_MAX_CONCURRENT_MODELS = 5).
+    private var contextLimit: Int = ModelAdmissionController.maxConcurrentModels
     private var nativeLogEnabled: Bool = false
+    // Memory admission control (parity with the Web DefaultModelScheduler).
+    private let admissionController = ModelAdmissionController()
     
     // MARK: - Core initialization and management
     
@@ -223,8 +226,19 @@ struct MinjaCaps {
     }
     
     func setContextLimit(limit: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
-        contextLimit = limit
-        print("[LlamaCpp] Context limit set to \(limit)")
+        let maxAllowed = admissionController.maxModelCount
+        guard limit >= 1 else {
+            completion(.failure(.operationFailed("Context limit must be at least 1")))
+            return
+        }
+        if limit > maxAllowed {
+            // Clamp to the isomorphic hard cap rather than silently over-committing memory.
+            print("[LlamaCpp] Requested context limit \(limit) exceeds max \(maxAllowed); clamping to \(maxAllowed)")
+            contextLimit = maxAllowed
+        } else {
+            contextLimit = limit
+        }
+        print("[LlamaCpp] Context limit set to \(contextLimit)")
         completion(.success(()))
     }
     
@@ -253,15 +267,25 @@ struct MinjaCaps {
     }
     
     func initContext(contextId: Int, params: [String: Any], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
-        // Check context limit
-        if contexts.count >= contextLimit {
-            completion(.failure(.operationFailed("Context limit reached")))
-            return
-        }
-        
         // Extract parameters
         guard let modelPath = params["model"] as? String else {
             completion(.failure(.invalidParameters))
+            return
+        }
+
+        // Memory admission control: enforce the concurrent-model slot limit AND a
+        // process-memory guard before touching native code (parity with the Web path).
+        let embedding = (params["embedding"] as? Bool) ?? false
+        let decision = admissionController.canAdmit(
+            currentlyLoaded: contexts.count,
+            modelPath: modelPath,
+            embedding: embedding
+        )
+        if !decision.allow {
+            let prefix = decision.deniedBy == .limit ? "MODEL_LIMIT_REACHED: " : "INSUFFICIENT_MEMORY: "
+            let reason = decision.reason ?? "Model admission rejected"
+            print("[LlamaCpp] Admission rejected for context \(contextId) — \(reason)")
+            completion(.failure(.operationFailed(prefix + reason)))
             return
         }
         

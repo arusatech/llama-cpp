@@ -1810,31 +1810,44 @@ The plugin supports loading multiple LLM models simultaneously across all platfo
 - **Implementation File:** `/src/isomorphic/wasmMemoryPolicy.ts` (Line 5: WASM_MAX_CONCURRENT_MODELS = 5)
 
 **Android Platform (JNI):**
-- **Default Concurrent Contexts: 10** (configurable)
-- **Max Limit: Unlimited** (can be increased via `setContextLimit(limit)`)
-- **Memory Management: Per-context** (no unified pool)
-- **Admission Control: Slot-based only** (no memory scheduler)
+- **Default Concurrent Contexts: 5** (aligned with the isomorphic cap)
+- **Max Limit: 5** (`setContextLimit(limit)` is clamped to the hard cap)
+- **Memory Management: Per-context** (isolated JNI contexts)
+- **Admission Control: Automatic** - `ModelAdmissionController` enforces slot limit AND a device-memory guard
+- **Memory Source: `ActivityManager.MemoryInfo`** (availMem, totalMem, lowMemory)
+- **Reserve Headroom: 512 MB** (kept free after each load)
 - **Thread Execution: ExecutorService thread pool** (async model loading)
-- **Implementation File:** `/android/src/main/java/ai/annadata/plugin/capacitor/LlamaCpp.java` (Line 251: contextLimit = 10)
+- **Implementation Files:** `LlamaCpp.java`, `ModelAdmissionController.java`
 
 **iOS Platform (Swift):**
-- **Default Concurrent Contexts: 10** (configurable)
-- **Max Limit: Unlimited** (can be increased via `setContextLimit(limit)`)
-- **Memory Management: Per-context** (no unified pool)
-- **Admission Control: Slot-based only** (no memory scheduler)
+- **Default Concurrent Contexts: 5** (aligned with the isomorphic cap)
+- **Max Limit: 5** (`setContextLimit(limit)` is clamped to the hard cap)
+- **Memory Management: Per-context** (isolated Swift contexts)
+- **Admission Control: Automatic** - `ModelAdmissionController` enforces slot limit AND a process-memory guard
+- **Memory Source: `os_proc_available_memory()`** (per-process budget before jetsam)
+- **Reserve Headroom: 512 MB** (kept free after each load)
 - **Thread Execution: GCD DispatchQueue** (async model loading)
-- **Implementation File:** `/ios/Sources/LlamaCppPlugin/LlamaCpp.swift` (Line 206: contextLimit = 10)
+- **Implementation Files:** `LlamaCpp.swift`, `ModelAdmissionController.swift`
 
 ### Concurrency Comparison Table
 
 | Aspect | Web (WASM) | Android | iOS |
 |--------|-----------|---------|-----|
-| Default Limit | 5 models | 10 contexts | 10 contexts |
-| Hardcoded? | ✅ YES | ❌ NO (user configurable) | ❌ NO (user configurable) |
-| Memory Admission Control | ✅ DefaultModelScheduler | ❌ None | ❌ None |
-| Memory Pool | Shared (1.5GB) | Individual contexts | Individual contexts |
+| Default Limit | 5 models | 5 contexts | 5 contexts |
+| Hard Cap Enforced? | ✅ YES | ✅ YES (clamped) | ✅ YES (clamped) |
+| Memory Admission Control | ✅ DefaultModelScheduler | ✅ ModelAdmissionController | ✅ ModelAdmissionController |
+| Memory Source | WASM linear pool | `ActivityManager.MemoryInfo` | `os_proc_available_memory()` |
+| Reserve Headroom | 64 MB | 512 MB | 512 MB |
+| Footprint Estimation | ✅ File × multiplier + headroom | ✅ File × multiplier + headroom | ✅ File × multiplier + headroom |
 | Execution Model | Single Web Worker | JNI thread pool | GCD dispatch queues |
-| Max Models API | `WASM_MAX_CONCURRENT_MODELS` constant | `setContextLimit(limit)` | `setContextLimit(limit)` |
+| Max Models API | `WASM_MAX_CONCURRENT_MODELS` constant | `setContextLimit(limit)` (clamped) | `setContextLimit(limit)` (clamped) |
+
+> **Isomorphic parity note:** As of v1.1.0, all three platforms enforce automatic memory
+> admission control. Native platforms (`ModelAdmissionController`) mirror the Web
+> `DefaultModelScheduler`: they estimate each model's footprint from the GGUF file size,
+> query a live memory snapshot, and reject a load when either the 5-model slot limit is
+> reached (`MODEL_LIMIT_REACHED`) or the projected free memory would drop below the
+> 512 MB reserve (`INSUFFICIENT_MEMORY`).
 
 ### Platform Architectural Rationale
 
@@ -1845,12 +1858,14 @@ The plugin supports loading multiple LLM models simultaneously across all platfo
 - 5 is the practical limit for typical model sizes with memory headroom
 - **Note:** This is a WASM architectural constraint, not a plugin limitation
 
-**Why Android/iOS Default to 10:**
-- Native threads can run independently (JNI or Swift concurrency)
+**Why Android/iOS Also Cap at 5:**
+- Native threads run independently (JNI or Swift concurrency), so parallel inference is possible
 - Each context is isolated in separate JNI contexts or Swift objects
-- Memory is managed per-context, not in a unified pool
-- More contexts can theoretically be supported (depends on device memory)
-- Developers can adjust via `setContextLimit(limit)` API call
+- Although native platforms could technically hold more contexts, the cap is aligned to 5
+  to guarantee isomorphic behaviour and predictable memory usage across platforms
+- `setContextLimit(limit)` accepts values 1–5 and clamps anything higher to the cap
+- The `ModelAdmissionController` additionally rejects loads that would exhaust device
+  memory, even below the 5-model cap (a single 70B model can exceed a phone's budget)
 
 ### Memory Estimation for Concurrent Models
 
@@ -1907,39 +1922,51 @@ try {
 }
 ```
 
-**Android/iOS Pattern:**
+**Android/iOS Pattern (BGE + LFM2 example):**
 ```typescript
-// Set custom limit (default is 10)
-await LlamaCpp.setContextLimit({ limit: 5 });
+// Load embedding + chat models — admission control runs automatically.
+const bge = await initLlama({ modelPath: 'bge-small.gguf', embedding: true, contextId: 0 });
+const lfm2 = await initLlama({ modelPath: 'lfm2-7b.gguf', contextId: 1 });
 
-// Load models (will succeed up to 5)
-const model1 = await initLlama({ modelPath: 'model1.gguf', contextId: 0 });
-const model2 = await initLlama({ modelPath: 'model2.gguf', contextId: 1 });
-// ... up to 5 models
+// Use both simultaneously
+const vec = await bge.embedding('text to embed');
+const out = await lfm2.completion('Hello');
 
-// Sixth model fails
+// A load that would exceed the 5-model cap OR the device-memory reserve
+// is rejected automatically with a structured error code.
 try {
-  const model6 = await initLlama({ modelPath: 'model6.gguf', contextId: 5 });
+  const model6 = await initLlama({ modelPath: 'huge-70b.gguf', contextId: 5 });
 } catch (error) {
-  // Error: Context limit reached
+  // error.message begins with either:
+  //   "MODEL_LIMIT_REACHED: ..."   (6th concurrent context)
+  //   "INSUFFICIENT_MEMORY: ..."   (would drop below the 512 MB reserve)
 }
 ```
 
 ### Important Implementation Notes
 
-1. **Feature Parity Caveat:**
+1. **Feature & Safety Parity (v1.1.0+):**
    - API methods are 100% identical across platforms
-   - Concurrency limits differ due to platform architecture
-   - Web is limited by WASM single-threaded model
-   - Android/iOS can theoretically support more (bounded by device RAM)
+   - Memory admission control is now enforced on ALL platforms
+   - The 5-model concurrency cap is uniform across Web, Android, and iOS
+   - `setContextLimit()` on native platforms is clamped to the hard cap
 
-2. **Model Scheduler (Web Only):**
-   - `DefaultModelScheduler` implements admission control
-   - `canAdmitWasmModelLoad()` enforces limits before loading
-   - `ensureCapacity()` prevents overcommitting memory
-   - See `/src/isomorphic/model.scheduler.ts` for implementation
+2. **Memory Admission Control (All Platforms):**
+   - **Web:** `DefaultModelScheduler` + `canAdmitWasmModelLoad()` against the WASM pool
+     — see `/src/isomorphic/model.scheduler.ts` and `wasmMemoryPolicy.ts`
+   - **Android:** `ModelAdmissionController` + `ActivityManager.MemoryInfo`
+     — see `ModelAdmissionController.java`
+   - **iOS:** `ModelAdmissionController` + `os_proc_available_memory()`
+     — see `ModelAdmissionController.swift`
+   - All three estimate model footprint from the GGUF file size (weights × multiplier + KV/compute headroom)
+   - All three reject loads that exceed the slot limit or the memory reserve
 
-3. **Thread Pool Execution:**
+3. **Structured Rejection Codes:**
+   - `MODEL_LIMIT_REACHED` — the 5-model concurrency cap would be exceeded
+   - `INSUFFICIENT_MEMORY` — projected free memory would fall below the reserve
+     (64 MB WASM pool reserve on Web; 512 MB device/process reserve on native)
+
+4. **Thread Pool Execution:**
    - Android: ExecutorService (fixed thread pool size)
    - iOS: Grand Central Dispatch DispatchQueue
    - Web: Single Web Worker (serialized request handling)
@@ -1956,17 +1983,19 @@ The LlamaCpp Capacitor Plugin implements a comprehensive **isomorphic architectu
 4. **Implements consistent error handling** and recovery patterns
 5. **Delivers predictable performance** with platform-appropriate tuning
 6. **Supports advanced features** including streaming, sessions, LoRA, and multimodal
-7. **Enforces memory safety** through platform-specific admission controls
+7. **Enforces memory safety** through uniform admission control on all three platforms
 
 **Key Architectural Constraint:**
-- Web/WASM: Max 5 concurrent models (WASM single-threaded, 1.5GB pool)
-- Android/iOS: Max 10 concurrent contexts by default (configurable, memory-dependent)
+- All platforms: Max 5 concurrent models, enforced by automatic admission control
+- Web/WASM: Bounded by a shared 1.5 GB WASM linear-memory pool (64 MB reserve)
+- Android: Bounded by device RAM via `ActivityManager.MemoryInfo` (512 MB reserve)
+- iOS: Bounded by the per-process budget via `os_proc_available_memory()` (512 MB reserve)
 
 The architecture enables developers to build sophisticated LLM applications that work seamlessly across all three platforms with a single codebase, while respecting platform-specific performance and memory constraints.
 
 ---
 
-**Document Version:** 1.0.1  
+**Document Version:** 1.1.0  
 **Last Updated:** July 2, 2026  
 **Status:** ✅ Production Ready  
-**Note:** Added comprehensive concurrency model documentation per architectural review
+**Note:** v1.1.0 — Added uniform memory admission control across iOS, Android, and Web (native `ModelAdmissionController` mirrors the Web `DefaultModelScheduler`)

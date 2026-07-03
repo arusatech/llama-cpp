@@ -248,13 +248,17 @@ public class LlamaCpp {
     private static final String TAG = "LlamaCpp";
     private final Map<Integer, LlamaContext> contexts = new HashMap<>();
     private int contextCounter = 0;
-    private int contextLimit = 10;
+    // Default aligned with the isomorphic limit (parity with WASM_MAX_CONCURRENT_MODELS = 5).
+    private int contextLimit = ModelAdmissionController.MAX_CONCURRENT_MODELS;
     private boolean nativeLogEnabled = false;
     private Context context;
+    // Memory admission control (parity with the Web DefaultModelScheduler).
+    private final ModelAdmissionController admissionController;
 
     // Constructor to receive context
     public LlamaCpp(Context context) {
         this.context = context;
+        this.admissionController = new ModelAdmissionController(context);
     }
 
     // Native method declarations
@@ -343,8 +347,20 @@ public class LlamaCpp {
     }
 
     public void setContextLimit(int limit, LlamaCallback<Void> callback) {
-        contextLimit = limit;
-        Log.i(TAG, "Context limit set to " + limit);
+        int maxAllowed = admissionController.maxModels();
+        if (limit < 1) {
+            callback.onResult(LlamaResult.failure(new LlamaError("Context limit must be at least 1")));
+            return;
+        }
+        if (limit > maxAllowed) {
+            // Clamp to the isomorphic hard cap rather than silently over-committing memory.
+            Log.w(TAG, "Requested context limit " + limit + " exceeds max " + maxAllowed
+                + "; clamping to " + maxAllowed);
+            contextLimit = maxAllowed;
+        } else {
+            contextLimit = limit;
+        }
+        Log.i(TAG, "Context limit set to " + contextLimit);
         callback.onResult(LlamaResult.success(null));
     }
 
@@ -533,17 +549,25 @@ public class LlamaCpp {
     }
 
     public void initContext(int contextId, JSObject params, LlamaCallback<Map<String, Object>> callback) {
-        // Check context limit
-        if (contexts.size() >= contextLimit) {
-            callback.onResult(LlamaResult.failure(new LlamaError("Context limit reached")));
-            return;
-        }
-
         try {
             // Extract parameters
             String modelPath = params.getString("model", "");
             if (modelPath == null || modelPath.isEmpty()) {
                 callback.onResult(LlamaResult.failure(new LlamaError("Model path is required")));
+                return;
+            }
+
+            // Memory admission control: enforce the concurrent-model slot limit AND a
+            // device-memory guard before touching native code (parity with the Web path).
+            boolean embedding = params.getBoolean("embedding", false);
+            ModelAdmissionController.Decision decision =
+                admissionController.canAdmit(contexts.size(), modelPath, embedding);
+            if (!decision.allow) {
+                String prefix = decision.deniedBy == ModelAdmissionController.DeniedBy.LIMIT
+                    ? "MODEL_LIMIT_REACHED: "
+                    : "INSUFFICIENT_MEMORY: ";
+                Log.w(TAG, "Admission rejected for context " + contextId + " — " + decision.reason);
+                callback.onResult(LlamaResult.failure(new LlamaError(prefix + decision.reason)));
                 return;
             }
 
