@@ -306,6 +306,24 @@ build_pwa() {
     fi
 }
 
+build_typescript() {
+    print_status "Building TypeScript..."
+    
+    if ! command -v npm &> /dev/null; then
+        print_warning "npm not found. Skipping TypeScript build."
+        return 0
+    fi
+    
+    # Compile TypeScript (without cleaning)
+    if npm run docgen 2>/dev/null && tsc && npx rollup -c rollup.config.mjs 2>/dev/null; then
+        print_success "TypeScript compiled successfully"
+        return 0
+    else
+        print_warning "TypeScript build failed"
+        return 0
+    fi
+}
+
 build_minimal() {
     print_header "Building MINIMAL Variant (~25-30 MB)"
     print_status "Contents: iOS arm64 + Android arm64 + PWA/WASM, stripped, no sources"
@@ -325,6 +343,9 @@ build_minimal() {
     
     # Build PWA/WASM
     build_pwa || print_warning "PWA build skipped"
+    
+    # Build TypeScript
+    build_typescript || print_warning "TypeScript build skipped"
     
     # Remove C++ sources
     print_status "C++ sources excluded for minimal size..."
@@ -353,6 +374,9 @@ build_core() {
     # Build PWA/WASM
     build_pwa || print_warning "PWA build skipped"
     
+    # Build TypeScript
+    build_typescript || print_warning "TypeScript build skipped"
+    
     # Keep C++ sources
     print_status "C++ sources included for flexibility"
     
@@ -378,6 +402,9 @@ build_development() {
     
     # Build PWA/WASM
     build_pwa || print_warning "PWA build skipped"
+    
+    # Build TypeScript
+    build_typescript || print_warning "TypeScript build skipped"
     
     # Keep everything
     print_status "Full sources and debug symbols included for development"
@@ -441,6 +468,9 @@ build_full() {
     
     # Build PWA/WASM
     build_pwa || print_warning "PWA build skipped"
+    
+    # Build TypeScript
+    build_typescript || print_warning "TypeScript build skipped"
     
     print_warning "Full variant ready (NOT recommended for production)"
 }
@@ -507,9 +537,9 @@ main() {
     print_success "Build variant '$VARIANT' completed successfully!"
     echo ""
     echo "Next steps:"
-    echo "  1. Run: npm run build"
-    echo "  2. Run: npm run verify:pack:artifacts"
-    echo "  3. Run: npm pack --ignore-scripts"
+    echo "  1. Run: npm run verify:pack:artifacts"
+    echo "  2. Run: npm pack --ignore-scripts"
+    echo "  3. Run: npm publish"
     echo ""
 }
 

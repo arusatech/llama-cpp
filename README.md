@@ -25,25 +25,38 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 
 ## ✅ **Complete Implementation Status**
 
-This plugin is now **FULLY IMPLEMENTED** with complete native integration of llama.cpp for both iOS and Android platforms. The implementation includes:
+This plugin is now **FULLY IMPLEMENTED** with complete native integration of llama.cpp for iOS, Android, and Web/PWA platforms. The implementation includes:
 
 ### **Completed Features**
+
 - **Complete C++ Integration**: Full llama.cpp library integration with all core components
-- **Native Build System**: CMake-based build system for both iOS and Android
-- **Platform Support**: iOS (arm64, x86_64) and Android (arm64-v8a, armeabi-v7a, x86, x86_64)
-- **TypeScript API**: Complete TypeScript interface matching llama.rn functionality
-- **Native Methods**: All 30+ native methods implemented with proper error handling
+- **Isomorphic Architecture**: Unified TypeScript API across iOS, Android, and Web with platform-specific optimizations
+- **Native Build System**: CMake-based build system for iOS and Android, plus Rust/WASM compilation for Web
+- **Web/PWA Support**: Complete WASM implementation with embedded llama.cpp via Rust FFI (src-rust)
+- **Concurrent Model Management**: Support for up to 5 concurrent models with automatic memory admission control
+- **Memory Scheduler**: Intelligent memory management across all platforms with per-device optimization
+- **Platform Support**: 
+  - iOS: arm64, x86_64 with Metal GPU acceleration
+  - Android: arm64-v8a, armeabi-v7a, x86, x86_64 with Adreno GPU acceleration
+  - Web/PWA: WebAssembly with SIMD acceleration and OPFS storage
+- **TypeScript API**: Complete TypeScript interface matching llama.rn functionality with 40+ methods
+- **Native Methods**: All 40+ native methods implemented with proper error handling
 - **Event System**: Capacitor event system for progress and token streaming
 - **Documentation**: Comprehensive README and API documentation
 
 ### **Technical Implementation**
+
 - **C++ Core**: Complete llama.cpp library with GGML, GGUF, and all supporting components
 - **iOS Framework**: Native iOS framework with Metal acceleration support
 - **Android JNI**: Complete JNI implementation with multi-architecture support
-- **Build Scripts**: Automated build system for both platforms
+- **Web/WASM Engine**: Rust FFI bridge to llama.cpp compiled to WebAssembly
+- **Rust Integration**: `src-rust/` directory contains Rust FFI layer for WASM compilation
+- **Build Scripts**: Automated build system for all three platforms
 - **Error Handling**: Robust error handling and result types
+- **Memory Management**: Automatic admission control with platform-specific tuning
 
 ### **Project Structure**
+
 ```
 llama-cpp/
 ├── cpp/                    # Complete llama.cpp C++ library
@@ -54,6 +67,16 @@ llama-cpp/
 │   ├── rn-completion.cpp  # Completion handling
 │   ├── rn-tts.cpp         # Text-to-speech
 │   └── tools/mtmd/        # Multimodal support
+├── src-rust/               # Rust FFI layer for WASM
+│   ├── src/
+│   │   ├── lib.rs         # Main WASM exports
+│   │   ├── ffi.rs         # FFI bridge to C/C++
+│   │   ├── engine.rs      # State management
+│   │   ├── model.rs       # Model registry & scheduler
+│   │   ├── memory.rs      # Memory admission control
+│   │   └── stream.rs      # Streaming support
+│   ├── Cargo.toml         # Rust dependencies
+│   └── build.rs           # C/C++ compilation script
 ├── ios/
 │   ├── CMakeLists.txt     # iOS build configuration
 │   └── Sources/           # Swift implementation
@@ -66,8 +89,45 @@ llama-cpp/
 ├── src/
 │   ├── definitions.ts     # Complete TypeScript interfaces
 │   ├── index.ts           # Main plugin implementation
-│   └── web.ts             # Web fallback
-└── build-native.sh        # Automated build script
+│   ├── web.ts             # Web/PWA implementation
+│   ├── isomorphic/        # Platform-specific providers
+│   │   ├── provider.web.ts      # Web provider with scheduler
+│   │   └── wasmMemoryPolicy.ts  # Memory admission control
+│   └── workers/           # Web Worker implementation
+│       └── llm.worker.ts  # WASM worker with model registry
+└── build-variants.sh      # Automated build script
+```
+
+### **Web/PWA Architecture**
+
+The Web implementation features:
+- **Rust WASM Engine** (`src-rust/`): Bridges JavaScript to C++ llama.cpp via FFI
+- **Model Registry**: Maintains up to 5 concurrent models with automatic management
+- **Memory Scheduler**: `DefaultModelScheduler` enforces 1.5 GB ceiling with 64 MB reserve
+- **Web Worker**: Runs inference off main thread for responsive UI
+- **OPFS Storage**: Efficient model storage using Origin Private File System
+- **Streaming Support**: Real-time token generation with event callbacks
+
+### **Concurrent Model Management**
+
+All platforms support simultaneous operation of multiple models:
+
+| Platform | Max Concurrent Models | Memory Management | Acceleration |
+|----------|----------------------|-------------------|--------------|
+| **Web/WASM** | 5 models | DefaultModelScheduler (1.5 GB pool, 64 MB reserve) | WASM SIMD |
+| **Android** | 5 contexts | ModelAdmissionController (device RAM, 512 MB reserve) | Adreno GPU |
+| **iOS** | 5 contexts | ModelAdmissionController (process memory, 512 MB reserve) | Metal GPU |
+
+**Example: Load 5 Models Concurrently**
+```typescript
+const models = await Promise.all([
+  initLlama({ modelPath: 'llama-7b.gguf', contextId: 0 }),
+  initLlama({ modelPath: 'mistral-7b.gguf', contextId: 1 }),
+  initLlama({ modelPath: 'tinyllama-1b.gguf', contextId: 2 }),
+  initLlama({ modelPath: 'bge-small.gguf', contextId: 3, embedding: true }),
+  initLlama({ modelPath: 'neural-vocoder.gguf', contextId: 4 })
+]);
+// All 5 run simultaneously with automatic memory management
 ```
 
 ## 📦 Installation
@@ -76,9 +136,41 @@ llama-cpp/
 npm install llama-cpp-capacitor
 ```
 
+**Package Size:** ~23-25 MB (minimal variant, no C++ sources, debug symbols stripped)
+- Includes: iOS arm64 + Android arm64 + PWA/WASM + TypeScript
+- For full build system details and variants, see [BUILD_GUIDE.md](BUILD_GUIDE.md)
+
 ## 🔨 **Building the Native Library**
 
 The plugin includes a complete native implementation of llama.cpp. To build the native libraries:
+
+### **Quick Start**
+
+```bash
+# Complete production build (iOS + Android + PWA/WASM)
+npm run clean:all
+./build-variants.sh --variant minimal
+npm publish
+```
+
+### **Build Variants**
+
+For complete build system documentation including all variants (minimal, core, development, ios-only, android-only, full), size optimization, and release procedures, see **[BUILD_GUIDE.md](BUILD_GUIDE.md)** and **[README_BUILD_SYSTEM.md](README_BUILD_SYSTEM.md)**.
+
+```bash
+# Production variant (~20 MB, no sources, stripped symbols)
+./build-variants.sh --variant minimal
+
+# Production with rebuild flexibility (~30-35 MB, with C++ sources)
+./build-variants.sh --variant core
+
+# Development variant (~50-60 MB, all architectures, debug symbols)
+./build-variants.sh --variant development
+
+# Platform-specific variants
+./build-variants.sh --variant ios-only
+./build-variants.sh --variant android-only
+```
 
 ### **Prerequisites**
 
@@ -90,15 +182,20 @@ The plugin includes a complete native implementation of llama.cpp. To build the 
 ### **Automated Build**
 
 ```bash
-# Build for all platforms
-npm run build:native
+# Build for all platforms (minimal variant)
+./build-variants.sh --variant minimal
 
-# Build for specific platforms
-npm run build:ios      # iOS only
-npm run build:android  # Android only
+# Build TypeScript (included in variant builds)
+npm run build
 
-# Clean native builds
-npm run clean:native
+# Verify all artifacts exist
+npm run verify:pack:artifacts
+
+# Clean specific components
+npm run clean          # Clean TypeScript dist
+npm run clean:native  # Clean iOS/Android builds
+npm run clean:wasm    # Clean WASM artifacts
+npm run clean:all     # Clean everything
 ```
 
 ### **Manual Build**
@@ -116,10 +213,41 @@ cd android
 ./gradlew assembleRelease
 ```
 
+### **Web/WASM Build**
+
+The Web implementation includes embedded llama.cpp compiled to WebAssembly via Rust FFI:
+
+```bash
+# Build Wasm with real llama.cpp (full build, ~30-120 seconds)
+LLAMA_WASM_EMBED_CPP=1 npm run build:wasm:embed
+
+# Copy WASM artifacts to dist/
+npm run build:wasm:assets
+
+# Run PWA smoke tests
+npm run test:pwa:smoke
+```
+
+**Build Process:**
+1. `src-rust/build.rs` compiles all C/C++ sources from `cpp/` directory
+2. Rust code in `src-rust/src/` links against compiled llama.cpp
+3. `wasm-pack` generates WebAssembly binary and JavaScript glue code
+4. Final WASM module (~2-5 MB) includes complete llama.cpp inference engine
+5. `wasm-bindgen` creates TypeScript definitions for type-safe bindings
+
+**Build Outputs:**
+- `dist/wasm/llama_engine.wasm` (~2-5 MB) - WebAssembly binary with embedded llama.cpp
+- `dist/wasm/llama_engine.js` - wasm-bindgen JavaScript wrapper
+- `dist/wasm/llama_engine.d.ts` - TypeScript type definitions
+
+For detailed WASM build instructions, see [BUILD_GUIDE.md](BUILD_GUIDE.md).
+
 ### **Build Output**
 
-- **iOS**: `ios/build/LlamaCpp.framework/`
-- **Android**: `android/src/main/jniLibs/{arch}/libllama-cpp-{arch}.so`
+- **iOS**: `ios/Frameworks/llama-cpp.framework/` (3-4 MB arm64 stripped)
+- **Android**: `android/src/main/jniLibs/arm64-v8a/libllama-cpp-arm64.so` (15-16 MB stripped)
+- **WASM**: `dist/wasm/llama_engine_emscripten.wasm` (~2-3 MB, included in builds)
+- **TypeScript**: `dist/esm/`, `dist/plugin.cjs.js` (1-2 MB)
 
 ### **Updating the native source (e.g. for vision model support)**
 
@@ -138,9 +266,11 @@ For a **step-by-step guide** on how methods are implemented on the iOS side (Swi
 
 ### iOS Setup
 
+The iOS native framework is built as part of the build process and included in the package.
+
 1. Install the plugin:
 ```sh
-npm install llama-cpp
+npm install llama-cpp-capacitor
 ```
 
 2. Add to your iOS project:
@@ -154,11 +284,15 @@ npx cap sync ios
 npx cap open ios
 ```
 
+The plugin includes a pre-built iOS framework (`ios/Frameworks/llama-cpp.framework`) with arm64 support and Metal GPU acceleration. For details on building locally, see [BUILD_GUIDE.md](BUILD_GUIDE.md).
+
 ### Android Setup
+
+The Android native library is built as part of the build process and included in the package.
 
 1. Install the plugin:
 ```sh
-npm install llama-cpp
+npm install llama-cpp-capacitor
 ```
 
 2. Add to your Android project:
@@ -171,6 +305,38 @@ npx cap sync android
 ```sh
 npx cap open android
 ```
+
+The plugin includes pre-built Android libraries (`android/src/main/jniLibs/arm64-v8a/`) for arm64 devices. For details on building locally or adding additional architectures, see [BUILD_GUIDE.md](BUILD_GUIDE.md).
+
+### Web/PWA Setup
+
+The plugin includes complete Web/PWA support with WASM acceleration. For web applications:
+
+```typescript
+import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+
+// Works seamlessly on Web/PWA without platform detection
+const context = await initLlama({
+  modelPath: '/models/model.gguf',
+  n_ctx: 2048,
+});
+
+const result = await context.completion({
+  prompt: 'Hello, how are you?',
+  n_predict: 100,
+});
+```
+
+**Web Features:**
+- **WASM Inference**: Rust FFI layer (`src-rust/`) for llama.cpp compilation to WebAssembly
+- **Model Registry**: Manage up to 5 concurrent models with automatic memory scheduling
+- **Memory Admission Control**: Smart allocation with per-device optimization
+- **Web Workers**: Runs inference off main thread for responsive UI
+- **OPFS Storage**: Efficient model caching using Origin Private File System
+- **Streaming Support**: Real-time token generation
+- **SIMD Acceleration**: WebAssembly SIMD for faster inference
+
+For complete Web/PWA build instructions, see [BUILD_GUIDE.md](BUILD_GUIDE.md).
 
 ## 🎯 Quick Start
 

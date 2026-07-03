@@ -19,7 +19,12 @@ let package = Package(
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
-            path: "ios/Sources/LlamaCppPlugin"),
+            path: "ios/Sources/LlamaCppPlugin",
+            // Note: This target uses a pre-built llama-cpp.framework
+            // For building locally, use: ./build-variants.sh --variant minimal
+            // See BUILD_GUIDE.md for complete build documentation
+            publicHeadersPath: "."),
+
         .testTarget(
             name: "LlamaCppPluginTests",
             dependencies: ["LlamaCppPlugin"],

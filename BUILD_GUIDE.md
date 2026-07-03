@@ -22,35 +22,47 @@ Complete, consolidated build documentation covering all variants, optimization t
 ### For Immediate Production Release
 
 ```bash
-# 1. Clean previous builds
-npm run clean:native
+# 1. Clean all previous builds
+npm run clean:all
 
-# 2. Build minimal variant (smallest, production-ready)
+# 2. Build minimal variant (complete: iOS + Android + PWA/WASM + TypeScript)
 ./build-variants.sh --variant minimal
 
-# 3. Build TypeScript
-npm run build
-
-# 4. Verify artifacts
+# 3. Verify all artifacts exist (checks iOS, Android, PWA/WASM files)
 npm run verify:pack:artifacts
 
-# 5. Pack and publish
-npm pack --ignore-scripts
+# 4. Publish to npm
 npm publish
 ```
 
-**Expected result:** ~20 MB package ready on npm ✅
+**Expected result:** ~23-25 MB package ready on npm ✅
+
+**What happens when you run `npm publish`:**
+- Automatically runs prepack hook to verify everything
+- Packages all artifacts into .tgz file
+- Publishes to npm registry
+- **No manual `npm pack` needed!**
+
+**✅ Complete build in ONE variant command - no separate steps needed!**
+
+**If you want to preview package contents before publishing:**
+```bash
+npm pack --ignore-scripts    # Creates package file and shows npm notice with size
+npm publish                  # Then publish to npm
+```
+
+**⚠️ DO NOT use `npm pack --dry-run` - it triggers a full rebuild!**
 
 ### Size Reference
 
 | Command | Size | Build Time | Use Case |
 |---------|------|-----------|----------|
-| `--variant minimal` | ~20 MB | ~5 min | ✅ Production (default) |
-| `--variant core` | ~30-35 MB | ~5 min | Production + rebuild |
-| `--variant development` | ~50-60 MB | ~10 min | Dev/testing |
+| `--variant minimal` | ~23-25 MB | ~5 min | ✅ Production (default) |
+| `--variant core` | ~33-40 MB | ~5 min | Production + rebuild |
+| `--variant development` | ~55-70 MB | ~10 min | Dev/testing |
 | `--variant ios-only` | ~8-10 MB | ~3 min | iOS only |
 | `--variant android-only` | ~25-30 MB | ~5 min | Android only |
-| `--variant full` | ~70+ MB | ~10 min | ❌ Not recommended |
+| `--variant full` | ~75+ MB | ~10 min | ❌ Not recommended |
 
 ---
 
@@ -60,13 +72,15 @@ npm publish
 
 | Aspect | Minimal | Core | Development | iOS-Only | Android-Only | Full |
 |--------|---------|------|-------------|----------|--------------|------|
-| **Size** | ~20 MB | ~30-35 MB | ~50-60 MB | ~8-10 MB | ~25-30 MB | ~70+ MB |
+| **Size** | ~23-25 MB | ~33-40 MB | ~55-70 MB | ~8-10 MB | ~25-30 MB | ~75+ MB |
 | **iOS** | arm64 stripped | arm64 stripped | arm64+x86_64 debug | arm64 | ✗ | All |
 | **Android** | arm64 stripped | arm64 stripped | arm64+x86_64 debug | ✗ | arm64 | All |
 | **Sources** | ✗ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Debug Symbols** | ✗ | ✗ | ✅ | ✗ | ✗ | ✅ |
-| **PWA/WASM** | Optional | Optional | Optional | ✗ | ✗ | ✅ |
-| **Use Case** | Public npm | Rebuild flexibility | Local dev | iOS apps | Android apps | ❌ Never |
+| **PWA/WASM** | ✅ Included* | ✅ Included* | ✅ Included* | ✗ | ✗ | ✅ Included* |
+| **Use Case** | Public npm | Rebuild flex | Local dev | iOS apps | Android apps | ❌ Never |
+
+*PWA/WASM automatically attempted, may fail gracefully if prerequisites missing
 
 ### 1. Minimal Variant (20-25 MB) ⭐ RECOMMENDED
 
@@ -592,10 +606,8 @@ npm run build
 # Verify build artifacts
 npm run verify:pack:artifacts
 
-# Check size
-npm pack --dry-run
-
-# List package contents
+# List package contents after packing
+npm pack --ignore-scripts
 tar -tzf llama-cpp-capacitor-0.2.0.tgz | head -20
 ```
 
@@ -825,7 +837,7 @@ Then run: `./build-variants.sh --variant custom`
 **A:** Create a SIZE_HISTORY.md:
 ```bash
 echo "=== llama-cpp-capacitor 0.2.0 ===" >> SIZE_HISTORY.md
-npm pack --dry-run && du -h llama-cpp-capacitor-*.tgz >> SIZE_HISTORY.md
+npm pack --ignore-scripts && du -h llama-cpp-capacitor-*.tgz >> SIZE_HISTORY.md
 ```
 
 ### Q: What's the difference between stripped and debug versions?

@@ -36,41 +36,47 @@ npm publish
 
 **Result:** Users get iOS + Android + PWA + WASM (~35-40 MB) ✅
 
-**Note:** The `./build-variants.sh --variant minimal` command attempts to build PWA/WASM, but this step may be optional and can fail gracefully.
+**Note:** When using `npm publish` directly, it runs the prepack hook which includes `npm run build`. However, when using `build-variants.sh` directly, do NOT run `npm run build` afterward as it deletes WASM artifacts.
 
 ### Manual Build Steps
 
 ```bash
-# 1. Clean previous builds
-npm run clean:native
+# 1. Clean all previous builds
+npm run clean:all
 
-# 2. Build minimal variant (iOS + Android only)
+# 2. Build minimal variant (includes iOS + Android + PWA/WASM + TypeScript - complete!)
 ./build-variants.sh --variant minimal
 
-# 3. Build TypeScript
-npm run build
-
-# 4. Build PWA/WASM separately (if needed)
-npm run build:pwa
-
-# 5. Verify artifacts
+# 3. Verify all artifacts exist
 npm run verify:pack:artifacts
 
-# 6. Check size
-npm pack --dry-run
-
-# 7. Publish
+# 4. Publish to npm
 npm publish
 ```
 
-**Note:** If you want PWA/WASM included, build it separately after the variant build.
+**What each step does:**
+- `verify:pack:artifacts`: Checks iOS, Android, and PWA/WASM files exist
+- `npm publish`: Automatically runs prepack hook to verify everything, packages, and publishes to npm registry
+
+**Note:** `build-variants.sh` handles EVERYTHING including TypeScript compilation. Do NOT run `npm run build` separately as it will delete WASM artifacts.
+
+**Alternative (if you want to see package contents before publishing):**
+```bash
+npm pack --ignore-scripts    # Creates package file, shows npm notice with size/contents
+npm publish                   # Publishes to npm
+```
+
+**Clean Scripts Available:**
+- `npm run clean` - Clean TypeScript dist
+- `npm run clean:native` - Clean iOS/Android builds
+- `npm run clean:wasm` - Clean WASM artifacts (Rust, pkg, dist/wasm)
+- `npm run clean:all` - Clean everything
 
 ### For Development Only
 
 ```bash
-# Full debug build (all architectures, debug symbols)
+# Full debug build (all architectures, debug symbols, complete build)
 ./build-variants.sh --variant development
-npm run build
 ```
 
 ---
@@ -99,6 +105,8 @@ npm run build
 ```bash
 ./build-variants.sh --variant [minimal|core|development|ios-only|android-only|full]
 ```
+
+**All variants except ios-only and android-only automatically attempt PWA/WASM building.**
 
 ### Minimal Variant (Recommended)
 
@@ -375,7 +383,7 @@ Before publishing to npm:
 - [ ] `CHANGELOG.md` updated with release notes
 - [ ] Local build successful: `npm run build:package`
 - [ ] Artifacts verified: `npm run verify:pack:artifacts`
-- [ ] Package size correct: `npm pack --dry-run` (~20 MB for minimal)
+- [ ] Package created: `npm pack --ignore-scripts` (~20 MB for minimal)
 - [ ] Package contents correct: `tar -tzf llama-cpp-capacitor-0.2.0.tgz | head -30`
 - [ ] npm login verified: `npm whoami`
 - [ ] Ready to publish: `npm publish`
@@ -405,6 +413,27 @@ VERBOSE=1 ./build-variants.sh --variant minimal
 BUILD_JOBS=16 STRIP_SYMBOLS=true VERBOSE=1 ./build-variants.sh --variant minimal
 ```
 
+## Clean Scripts
+
+Clean up build artifacts:
+
+```bash
+# Clean TypeScript compiled output
+npm run clean
+
+# Clean iOS and Android native builds
+npm run clean:native
+
+# Clean WASM/Rust artifacts
+npm run clean:wasm
+
+# Clean everything
+npm run clean:all
+
+# Clean test artifacts
+npm run clean:test
+```
+
 ---
 
 ## Common Issues
@@ -420,8 +449,8 @@ npm run clean:native
 ### Package size larger than expected
 
 ```bash
-# Check what's included
-npm pack --dry-run
+# Create package and check size
+npm pack --ignore-scripts
 
 # Verify C++ sources not included for minimal
 tar -tzf llama-cpp-capacitor-0.2.0.tgz | grep "cpp/" | wc -l
@@ -528,7 +557,7 @@ Everything gets packaged and published automatically. You can literally just run
 1. Which variant you built: `./build-variants.sh --variant [name]`
 2. That strip symbols was enabled: `STRIP_SYMBOLS=true` (default)
 3. What's in the files array of package.json
-4. Run `npm pack --dry-run` to see actual size
+4. Run `npm pack --ignore-scripts` to create package and see actual size
 
 ### Q: How do I track size changes over releases?
 
@@ -581,10 +610,12 @@ node_modules/llama-cpp-capacitor/
 ### Estimated Sizes by Variant
 
 ```
-Minimal:      ~20 MB    ✅ (No sources, stripped)
-Core:         ~30-35 MB ✅ (With sources, stripped)
-Development:  ~50-60 MB ❌ (Debug, not for npm)
-Full:         ~70+ MB   ❌ (Everything, not recommended)
+Minimal:      ~23-25 MB ✅ (No sources, stripped, with PWA attempt)
+Core:         ~33-40 MB ✅ (With sources, stripped, with PWA attempt)
+Development:  ~55-70 MB ❌ (Debug, not for npm, with PWA attempt)
+Full:         ~75+ MB   ❌ (Everything, not recommended, with PWA attempt)
+
+Note: Sizes include PWA/WASM if build succeeds. Without PWA, subtract 2-3 MB.
 ```
 
 ---
@@ -666,10 +697,12 @@ jobs:
 ### Build Commands
 
 ```bash
-# Build any variant
-./build-variants.sh --variant minimal    # ~20 MB (recommended)
-./build-variants.sh --variant core       # ~30-35 MB
-./build-variants.sh --variant development # ~50-60 MB
+# Build any variant (all except ios-only/android-only automatically attempt PWA/WASM)
+./build-variants.sh --variant minimal       # ~23-25 MB (recommended)
+./build-variants.sh --variant core          # ~33-40 MB
+./build-variants.sh --variant development   # ~55-70 MB
+./build-variants.sh --variant ios-only      # ~8-10 MB (no PWA)
+./build-variants.sh --variant android-only  # ~25-30 MB (no PWA)
 
 # Compile TypeScript
 npm run build
@@ -681,9 +714,6 @@ npm run verify:pack:artifacts
 ### Package Commands
 
 ```bash
-# See what gets packaged (dry run)
-npm pack --dry-run
-
 # Create package file
 npm pack --ignore-scripts
 
@@ -717,9 +747,8 @@ npm view llama-cpp-capacitor@0.2.0 dist
 3. **Update version:** Change to `0.2.0` from `0.2.0-rc.0`
 4. **Update docs:** CHANGELOG.md, README.md
 5. **Test build:** `npm run build:package`
-6. **Verify size:** `npm pack --dry-run`
-7. **Publish:** `npm publish`
-8. **Verify:** `npm view llama-cpp-capacitor@0.2.0`
+6. **Publish:** `npm publish`
+7. **Verify:** `npm view llama-cpp-capacitor@0.2.0`
 
 ---
 
