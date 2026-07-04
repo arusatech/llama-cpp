@@ -145,11 +145,13 @@ llama_context::llama_context(
     }
 
     if (!hparams.vocab_only) {
-        // GPU backends
+        // GPU backends (skip and fall back to CPU when init fails, e.g. simulator without Metal)
         for (auto * dev : model.devices) {
             lm_ggml_backend_t backend = lm_ggml_backend_dev_init(dev, nullptr);
             if (backend == nullptr) {
-                throw std::runtime_error(format("failed to initialize %s backend", lm_ggml_backend_dev_name(dev)));
+                LLAMA_LOG_WARN("%s: failed to initialize %s backend, skipping (CPU fallback)\n",
+                        __func__, lm_ggml_backend_dev_name(dev));
+                continue;
             }
             backends.emplace_back(backend);
         }

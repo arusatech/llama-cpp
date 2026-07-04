@@ -279,12 +279,21 @@ npx cap add ios
 npx cap sync ios
 ```
 
+**Simulator builds** (macOS + Xcode + cmake): build a device+simulator xcframework once, then re-sync:
+
+```sh
+bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
+npx cap sync ios
+```
+
+Or from a local plugin checkout: `npm run build:ios:xcframework`
+
 3. Open the project in Xcode:
 ```sh
 npx cap open ios
 ```
 
-The plugin includes a pre-built iOS framework (`ios/Frameworks/llama-cpp.framework`) with arm64 support and Metal GPU acceleration. For details on building locally, see [BUILD_GUIDE.md](BUILD_GUIDE.md).
+The plugin ships a pre-built **device** framework (`ios/Frameworks/llama-cpp.framework`, arm64, Metal + CPU fallback). `Package.swift` is Swift-only; the native binary is loaded at runtime via `dlopen`. For simulator slices, run the xcframework script above. See [BUILD_GUIDE.md](BUILD_GUIDE.md) for local rebuilds.
 
 ### Android Setup
 

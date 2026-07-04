@@ -1,5 +1,5 @@
 import XCTest
-@testable import LlamaCppPlugin
+@testable import LlamaCppCapacitor
 
 class LlamaCppTests: XCTestCase {
     func testEcho() {

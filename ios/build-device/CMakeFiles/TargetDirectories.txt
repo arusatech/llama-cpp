@@ -1,0 +1,7 @@
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/llama-cpp.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/edit_cache.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/rebuild_cache.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/list_install_components.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/install.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/install/local.dir
+/Users/annadata/Project_A/annadata-llama-cpp/ios/build-device/CMakeFiles/install/strip.dir

@@ -1,0 +1,41 @@
+---
+description: Optional — internal annadata-app sibling repo (not required for plugin install)
+alwaysApply: false
+---
+
+# Optional: annadata-app (internal client)
+
+This plugin is **published and installed independently** (`npm install llama-cpp-capacitor`). The sibling app below is only used for Annadata's own product QA — not required for other developers.
+
+```
+Project_A/
+  annadata-llama-cpp/   ← plugin (you are here)
+  annadata-app/         ← optional internal Ionic client
+```
+
+## Standard install (any Capacitor app)
+
+```bash
+npm install llama-cpp-capacitor
+npx cap sync ios    # or android
+```
+
+**iOS simulator:** from your app root (macOS + Xcode + cmake):
+
+```bash
+bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
+npx cap sync ios
+```
+
+**Release / pack:** `npm run build:package && npm run verify:pack:artifacts`
+
+## Internal-only sync (Annadata dev)
+
+When `../annadata-app` exists:
+
+```bash
+npm run sync:dev:annadata-app          # WASM → annadata-app/public/llama-wasm
+npm run sync:dev:annadata-app:native   # pack + reinstall in sibling app
+```
+
+Native runtime loads via `LlamaNativeBridge` (`dlopen` on `llama-cpp.framework/llama-cpp`). `Package.swift` is Swift-only — no SPM binaryTarget path dependency.

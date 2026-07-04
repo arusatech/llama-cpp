@@ -93,49 +93,49 @@ if (!js.includes('jsModelVfsBegin')) {
 if (!js.includes('preferHeapFsVfs')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing preferHeapFsVfs (BGE embed HeapFS routing).\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (!js.includes('disableAsyncFileEnv')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing disableAsyncFileEnv (HeapFS fread guard).\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (mjs.includes('cap_wasm_set_use_async_file') && js.includes('const LLAMA_WASM_JSPI = false')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: WASM has async file bridge but llama_engine.js has LLAMA_WASM_JSPI=false.\n` +
-      `Run: LLAMA_WASM_JSPI=1 node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: LLAMA_WASM_JSPI=1 npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (!js.includes('wasmHasAsyncFileBridge')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing wasmHasAsyncFileBridge runtime probe.\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (js.includes('opts.n_batch > 8') && js.includes('mode === \'heapfs\'')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js still caps embedding n_batch=8 (BERT encode trap).\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (!js.includes('encBatch')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing BERT encBatch clamp (n_batch=n_ctx).\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
 if (!js.includes('wasmEmbedViaCwrap')) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing cwrap embed path.\n` +
-      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `Run: npm run build:pwa:full`,
   );
   process.exit(1);
 }
@@ -146,7 +146,7 @@ if (syntaxCheck.status !== 0) {
   console.error(
     `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js failed node --check (invalid JS syntax).\n` +
       (syntaxCheck.stderr || syntaxCheck.stdout || '') +
-      `\nRegenerate: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+      `\nRegenerate: npm run build:pwa:full`,
   );
   process.exit(1);
 }

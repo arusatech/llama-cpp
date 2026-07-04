@@ -8,17 +8,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0)
 set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
 
-# Common llama.cpp definitions
+# Metal first (embedded shader source); CPU + Accelerate always available as fallback.
 add_definitions(
     -DNDEBUG
     -DO3
     -DLM_GGML_USE_CPU
     -DLM_GGML_USE_ACCELERATE
     -DLM_GGML_USE_METAL
+    -DLM_GGML_METAL_EMBED_LIBRARY
     -DLM_GGML_METAL_USE_BF16
 )
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../cpp)
+
+enable_language(ASM)
+include(${CMAKE_CURRENT_SOURCE_DIR}/metal-embed.cmake)
 
 # ARM64‑tuned ggml sources
 set(SOURCE_FILES_ARCH
@@ -106,6 +110,7 @@ add_library(llama-cpp SHARED
     ${SOURCE_DIR}/cap-native-server.cpp
     ${SOURCE_DIR}/vendor/cpp-httplib/httplib.cpp
     ${SOURCE_FILES_ARCH}
+    ${METALLIB_EMBED_ASM}
 )
 
 # Set target properties
