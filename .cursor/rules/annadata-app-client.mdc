@@ -31,11 +31,12 @@ npx cap sync ios
 
 ## Internal-only sync (Annadata dev)
 
-When `../annadata-app` exists:
+When `../annadata-app` exists, run sync from **the app repo** (not here):
 
 ```bash
-npm run sync:dev:annadata-app          # WASM → annadata-app/public/llama-wasm
-npm run sync:dev:annadata-app:native   # pack + reinstall in sibling app
+cd ../annadata-app
+npm run sync:llama-cpp:wasm     # WASM → public/llama-wasm (after build:pwa:full here)
+npm run sync:llama-cpp:native   # pack + reinstall + cap sync
 ```
 
 Native runtime loads via `LlamaNativeBridge` (`dlopen` on `llama-cpp.framework/llama-cpp`). `Package.swift` is Swift-only — no SPM binaryTarget path dependency.
