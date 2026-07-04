@@ -194,6 +194,8 @@ fn main() {
     if pthread {
         c_build.flag("-pthread");
         cxx_build.flag("-pthread");
+        c_build.define("CAPLLAMA_BUILD_WASM_PTHREAD", None);
+        cxx_build.define("CAPLLAMA_BUILD_WASM_PTHREAD", None);
         println!("cargo:rustc-cfg=capllama_wasm_pthread");
         println!("cargo:warning=Building embedded llama.cpp with pthread support (compile only; link at Stage 4)");
     }

@@ -217,7 +217,7 @@ done
 WLLAMA_LINK_FLAGS=(
   -sFORCE_FILESYSTEM=1
   -sEXPORTED_RUNTIME_METHODS=['FS','MEMFS','HEAPU8','mmapAlloc','wasmMemory','ENV','cwrap','growMemory']
-  -sEXPORTED_FUNCTIONS=['_malloc','_free','_llama_load_context_from_path','_llama_completion']
+  -sEXPORTED_FUNCTIONS=['_malloc','_free','_llama_load_context_from_path','_llama_completion','_llama_embedding_json']
 )
 # Pthread builds import shared memory from JS (getWasmMemory in the shim).
 if [[ "$LLAMA_WASM_PTHREAD" == "1" ]]; then
@@ -234,7 +234,7 @@ if [[ "$LLAMA_WASM_JSPI" == "1" ]]; then
     -Wl,--wrap=fread
     -Wl,--wrap=fseek
     -Wl,--wrap=ftell
-    -sEXPORTED_FUNCTIONS=['_malloc','_free','_llama_load_context_from_path','_llama_completion','_cap_wasm_set_use_async_file']
+    -sEXPORTED_FUNCTIONS=['_malloc','_free','_llama_load_context_from_path','_llama_completion','_llama_embedding_json','_cap_wasm_set_use_async_file']
   )
 fi
 

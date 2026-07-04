@@ -118,6 +118,27 @@ if (!js.includes('wasmHasAsyncFileBridge')) {
   );
   process.exit(1);
 }
+if (js.includes('opts.n_batch > 8') && js.includes('mode === \'heapfs\'')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js still caps embedding n_batch=8 (BERT encode trap).\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+if (!js.includes('encBatch')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing BERT encBatch clamp (n_batch=n_ctx).\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
+if (!js.includes('wasmEmbedViaCwrap')) {
+  console.error(
+    `[sync-annadata-app-wasm] ERROR: ${destDir}/llama_engine.js is missing cwrap embed path.\n` +
+      `Run: node scripts/package-embed-wasm.mjs && npm run build:wasm:assets && npm run sync:annadata-app`,
+  );
+  process.exit(1);
+}
 const syntaxCheck = spawnSync(process.execPath, ['--check', resolve(destDir, 'llama_engine.js')], {
   encoding: 'utf8',
 });

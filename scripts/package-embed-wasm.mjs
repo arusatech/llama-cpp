@@ -490,6 +490,7 @@ export function unload_model(model_id) {
   _modelContextIds.delete(String(model_id));
   _loadedModelBytes.delete(String(model_id));
   _loadedModelOpts.delete(String(model_id));
+  _embedGraphWarmed.delete(String(model_id));
   _measuredFootprintBytes.delete(String(model_id));
   _linearAtLoadStart.delete(String(model_id));
   _mod.unload_model(model_id);
@@ -526,6 +527,7 @@ export function list_loaded_models() {
 /** model_id → C++ context id (cwrap path — same pattern as llama_load_context_from_path). */
 const _modelContextIds = new Map();
 let _cwrapCompletion = null;
+let _cwrapEmbeddingJson = null;
 
 /** Emscripten 3.x / WASM i64 — cwrap and wasm-bindgen expect bigint for int64_t. */
 function wasmI64Arg(value) {
@@ -653,6 +655,107 @@ function wasmGenerateViaCwrap(model_id, req_json) {
   return raw;
 }
 
+function resolveEmbeddingFn() {
+  if (_cwrapEmbeddingJson) return _cwrapEmbeddingJson;
+  const name = 'llama_embedding_json';
+  const wrapCall = (raw, useBigintArg) => (ctxId, text, paramsJson) =>
+    raw(useBigintArg ? wasmI64Arg(ctxId) : Number(ctxId), text, paramsJson ?? '{}');
+  if (typeof _mod.cwrap === 'function') {
+    for (const argType of ['bigint', 'number']) {
+      try {
+        const raw = _mod.cwrap(name, 'string', [argType, 'string', 'string']);
+        if (typeof raw === 'function') {
+          _cwrapEmbeddingJson = wrapCall(raw, argType === 'bigint');
+          return _cwrapEmbeddingJson;
+        }
+      } catch (_) {}
+    }
+  }
+  const rawFn = _mod['_' + name] ?? _mod.wasmExports?.[name];
+  if (typeof rawFn === 'function') {
+    _cwrapEmbeddingJson = (ctxId, text, paramsJson) => {
+      try {
+        return rawFn(wasmI64Arg(ctxId), text, paramsJson ?? '{}');
+      } catch (e1) {
+        return rawFn(Number(ctxId), text, paramsJson ?? '{}');
+      }
+    };
+    return _cwrapEmbeddingJson;
+  }
+  throw new Error('llama_embedding_json not exported — rebuild wasm (EXPORTED_FUNCTIONS)');
+}
+
+function parseEmbedRequest(req_json) {
+  let req = {};
+  try {
+    req = JSON.parse(req_json || '{}');
+  } catch (e) {
+    throw new Error('Invalid embed request JSON: ' + (e && e.message ? e.message : String(e)));
+  }
+  let inputs;
+  if (typeof req.input === 'string') {
+    inputs = [req.input];
+  } else if (Array.isArray(req.input)) {
+    inputs = req.input.map((v) => String(v));
+  } else {
+    throw new Error('Embed request missing input (string or string[])');
+  }
+  if (inputs.length === 0 || inputs.every((t) => !String(t).trim())) {
+    throw new Error('Embed request input is empty');
+  }
+  const paramsJson = req.normalize != null
+    ? JSON.stringify({ embd_normalize: req.normalize ? 2 : -1 })
+    : '{}';
+  return { inputs, paramsJson };
+}
+
+/** Inference via C cwrap (avoids wasm-bindgen malloc abort after heap grow). */
+function wasmEmbedViaCwrap(model_id, req_json) {
+  const ctxId = _modelContextIds.get(String(model_id));
+  if (!ctxId || ctxId <= 0) {
+    throw new Error('Model not loaded (no WASM context id for ' + model_id + ')');
+  }
+  const { inputs, paramsJson } = parseEmbedRequest(req_json);
+  const embedFn = resolveEmbeddingFn();
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (typeof console !== 'undefined') {
+    console.error(
+      '[llama-wasm] cwrap embed: model=' + model_id + ' ctxId=' + ctxId +
+      ' n=' + inputs.length + ' wasmMB=' + wasmLinearMb(),
+    );
+  }
+  const vectors = [];
+  for (const text of inputs) {
+    const raw = embedFn(ctxId, text, paramsJson);
+    if (typeof raw !== 'string') {
+      throw new TypeError('llama_embedding_json returned ' + typeof raw);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      throw new Error('llama_embedding_json returned non-JSON: ' + raw.slice(0, 160));
+    }
+    if (parsed && typeof parsed.error === 'string' && parsed.error.length > 0) {
+      throw new Error(parsed.error);
+    }
+    if (!Array.isArray(parsed?.embedding) || parsed.embedding.length === 0) {
+      throw new Error('llama_embedding_json returned empty embedding');
+    }
+    vectors.push(parsed.embedding);
+  }
+  const elapsedMs = Math.round(
+    (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0,
+  );
+  if (typeof console !== 'undefined') {
+    console.error(
+      '[llama-wasm] cwrap embed ok n=' + vectors.length + ' dim=' + (vectors[0]?.length ?? 0) +
+      ' ms=' + elapsedMs,
+    );
+  }
+  return JSON.stringify({ vectors });
+}
+
 /** Run text generation. Returns JSON GenerateResponse. */
 export function generate(model_id, req_json) {
   if (!_mod) throw new Error('llama_engine not ready — await init() first');
@@ -677,10 +780,58 @@ export function generate_stream(model_id, req_json, on_token) {
   }
 }
 
+function growWasmLinearTo(targetBytes) {
+  if (!_mod) return;
+  const current = _mod.HEAPU8?.length ?? _mod.wasmMemory?.buffer?.byteLength ?? 0;
+  if (current >= targetBytes) return;
+  let grown = false;
+  if (typeof _mod.growMemory === 'function') {
+    grown = _mod.growMemory(targetBytes) === 1;
+  } else if (typeof _mod.emscripten_resize_heap === 'function') {
+    grown = !!_mod.emscripten_resize_heap(targetBytes);
+  }
+  if (!grown) {
+    throw new Error(
+      '[llama-wasm] failed to grow wasm memory to ' + targetBytes + ' bytes (have ' + current + ')',
+    );
+  }
+  heapfsResyncViews();
+  const after = _mod.HEAPU8?.length ?? _mod.wasmMemory?.buffer?.byteLength ?? 0;
+  if (typeof console !== 'undefined') {
+    console.error(
+      '[llama-wasm] embed memory grow: ' + (current / 1048576).toFixed(0) + 'MB -> ' +
+      (after / 1048576).toFixed(0) + 'MB',
+    );
+  }
+}
+
+/** Reserve slack for lazy encoder-graph alloc on first embed (BERT / pooling models). */
+function ensureEmbedInferenceHeadroom(model_id) {
+  if (!_mod) return;
+  const id = String(model_id);
+  if (_embedGraphWarmed.has(id)) return;
+  const opts = _loadedModelOpts.get(id) ?? {};
+  if (!opts.embedding) {
+    _embedGraphWarmed.add(id);
+    return;
+  }
+  const current = _mod.HEAPU8?.length ?? _mod.wasmMemory?.buffer?.byteLength ?? 0;
+  const target = Math.min(current + 64 * 1024 * 1024, WASM_MAX_BYTES);
+  if (current < target) {
+    growWasmLinearTo(target);
+  }
+  _embedGraphWarmed.add(id);
+}
+
 /** Generate embeddings. Returns JSON EmbedResponse. */
 export function embed(model_id, req_json) {
   if (!_mod) throw new Error('llama_engine not ready — await init() first');
-  return _mod.embed(model_id, req_json);
+  try {
+    ensureEmbedInferenceHeadroom(model_id);
+    return wasmEmbedViaCwrap(model_id, req_json);
+  } catch (err) {
+    throw wasmThrowToError(err, 'embed failed');
+  }
 }
 
 /** Rank documents by relevance (rank-pooling embed models). Returns JSON array. */
@@ -837,6 +988,8 @@ const _loadedAsyncModels = new Map();
 const _loadedModelBytes = new Map();
 /** Load opts per model — for accurate footprint when summing resident models. */
 const _loadedModelOpts = new Map();
+/** First embed per model may lazily allocate encoder graph — one-time heap bump. */
+const _embedGraphWarmed = new Set();
 /** Post-load measured WASM bytes per model (calibrated from linear heap delta). */
 const _measuredFootprintBytes = new Map();
 /** Linear heap bytes captured immediately before each model load. */
@@ -1351,17 +1504,19 @@ function loadOptsForMemory(opts_json, mode, modelBytes) {
   try {
     opts = JSON.parse(opts_json || '{}');
   } catch (_) {}
+  const embedding = opts.embedding === true || opts.embedding === 'true';
+  const n_ctx = typeof opts.n_ctx === 'number' && opts.n_ctx > 0
+    ? opts.n_ctx
+    : embedding ? 128 : effectiveNctx(modelBytes, opts_json);
+  // BERT/encoder: llama_encode() asserts n_ubatch >= n_tokens — always match n_batch to n_ctx.
+  const n_batch = embedding
+    ? n_ctx
+    : (typeof opts.n_batch === 'number' && opts.n_batch > 0 ? opts.n_batch : 16);
   return {
     mode,
-    n_ctx: typeof opts.n_ctx === 'number' && opts.n_ctx > 0
-      ? opts.n_ctx
-      : effectiveNctx(modelBytes, opts_json),
-    n_batch: typeof opts.n_batch === 'number' && opts.n_batch > 0
-      ? opts.n_batch
-      : (opts.embedding === true || opts.embedding === 'true')
-        ? (mode === 'async' ? 64 : 8)
-        : 16,
-    embedding: opts.embedding === true || opts.embedding === 'true',
+    n_ctx,
+    n_batch,
+    embedding,
   };
 }
 
@@ -1376,13 +1531,13 @@ function estimateModelWasmFootprint(fileBytes, memOpts = {}, mode) {
     : embedding ? 128 : 512;
   const n_batch = typeof memOpts.n_batch === 'number' && memOpts.n_batch > 0
     ? memOpts.n_batch
-    : embedding ? 8 : 16;
+    : embedding ? n_ctx : 16;
   // Async OPFS (use_mmap=false) and HeapFS COPY duplicate weights during tensor init (~2× file size).
   const weightMultiplier = embedding
     ? (heapfsMmap ? 1.15 : heapfsCopy ? 2.2 : 2.0)
     : fileBytes > 200 * 1024 * 1024 ? 1.32 : 1.2;
-  // llama_context bumps n_batch to LM_GGML_KQ_MASK_PAD (64) only for causal models.
-  const effectiveBatch = embedding && mode === 'async' ? Math.max(n_batch, 64) : n_batch;
+  // Encoder-only (BERT): n_ubatch = min(n_batch, …) and must cover the full prompt.
+  const effectiveBatch = embedding ? Math.max(n_batch, n_ctx) : n_batch;
   const ctxBytes = n_ctx * effectiveBatch * 4096;
   const graphReserve = embedding
     ? (heapfsMmap ? 64 * 1024 * 1024 : heapfsCopy ? 48 * 1024 * 1024 : (mode === 'async' ? 96 * 1024 * 1024 : 32 * 1024 * 1024))
@@ -1668,18 +1823,12 @@ function vfsLoadOptsJson(opts_json, mode, modelBytes) {
     if (opts.n_ctx == null || opts.n_ctx > 128) {
       opts.n_ctx = 128;
     }
-    if (mode === 'async') {
-      if (opts.n_batch == null || opts.n_batch > 64) {
-        opts.n_batch = 64;
-      }
-    } else if (mode === 'heapfs') {
-      if (opts.n_batch == null || opts.n_batch > 8) {
-        opts.n_batch = 8;
-      }
-    } else {
-      if (opts.n_batch == null || opts.n_batch > 8) {
-        opts.n_batch = 8;
-      }
+    // BERT encode: n_ubatch must be >= token count; match n_batch to n_ctx.
+    const encBatch = opts.n_ctx;
+    if (opts.n_batch == null || opts.n_batch < encBatch) {
+      opts.n_batch = encBatch;
+    } else if (opts.n_batch > encBatch) {
+      opts.n_batch = encBatch;
     }
   } else if (modelBytes < 100 * 1024 * 1024) {
     if (opts.n_ctx == null || opts.n_ctx > 256) {

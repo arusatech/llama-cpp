@@ -929,7 +929,7 @@ struct common_init_result common_init_from_params(common_params & params) {
     }
 
 #ifdef __EMSCRIPTEN__
-    fprintf(stderr, "@@WASM_LOAD@@ common_init: llama_init_from_model ok\n");
+    fprintf(stderr, "@@WASM_LOAD@@ common_init: llama_init_from_model ok ctx_shift=%d\n", params.ctx_shift ? 1 : 0);
 #endif
 
     if (params.ctx_shift && !llama_memory_can_shift(llama_get_memory(lctx))) {

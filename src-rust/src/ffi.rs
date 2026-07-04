@@ -306,10 +306,21 @@ pub fn embedding(context_id: i64, text: &str, params_json: &str) -> Result<Vec<f
             .and_then(|v| v.as_array())
             .ok_or_else(|| "Missing 'embedding' array in response".to_string())?;
 
+        if let Some(err) = json_result.get("error").and_then(|v| v.as_str()) {
+            return Err(format!("Embedding failed: {}", err));
+        }
+
         let vector: Vec<f32> = embedding_arr
             .iter()
             .map(|v| v.as_f64().unwrap_or(0.0) as f32)
             .collect();
+
+        if vector.is_empty() {
+            return Err(
+                "Embedding returned empty vector — check input text and model pooling settings"
+                    .to_string(),
+            );
+        }
 
         Ok(vector)
     }

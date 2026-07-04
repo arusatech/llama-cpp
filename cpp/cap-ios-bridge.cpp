@@ -193,7 +193,7 @@ bool load_with_fallback(std::unique_ptr<capllama::llama_cap_context> & context, 
     // Never fall back to use_mmap=false on WASM — copying a 700 MB GGUF OOMs.
     minimal.use_mmap = cparams.use_mmap;
     minimal.n_ctx = cparams.embedding ? 64 : 64;
-    minimal.n_batch = cparams.embedding ? 8 : 32;
+    minimal.n_batch = cparams.embedding ? minimal.n_ctx : 32;
     fprintf(stderr,
         "@@WASM_LOAD@@ phase=fallback begin n_ctx=%d n_batch=%d use_mmap=%d\n",
         minimal.n_ctx, minimal.n_batch, minimal.use_mmap ? 1 : 0);
@@ -436,16 +436,18 @@ int64_t llama_init_context(const char * model_path, const char * params_json) {
         cparams.cpuparams.n_threads = 1;
         cparams.cpuparams_batch.n_threads = 1;
         if (cparams.embedding) {
-            // P1: Allow n_batch up to 64 if pre-set by host (WASM pre-grown for larger graph)
-            // If not set, default to 8 for memory safety on older WASM instances
-            if (cparams.n_batch > 64) {
-                cparams.n_batch = 64;
-            } else if (cparams.n_batch <= 0) {
-                cparams.n_batch = 8; // default
-            }
-            // Otherwise use whatever is set (including 64 from async mode)
+            // BERT/embedding models have no KV cache — ctx_shift is meaningless and the
+            // common_log LOG_WRN on the unsupported path is the first LOG_* call in load.
+            cparams.ctx_shift = false;
             if (cparams.n_ctx > 128) {
                 cparams.n_ctx = 128;
+            }
+            // Encoder-only (BERT): llama_encode() requires n_ubatch >= n_tokens for the
+            // full sequence. n_ubatch = min(n_batch, n_ubatch) in llama_context ctor.
+            if (cparams.n_batch <= 0 || cparams.n_batch < cparams.n_ctx) {
+                cparams.n_batch = cparams.n_ctx;
+            } else if (cparams.n_batch > cparams.n_ctx) {
+                cparams.n_batch = cparams.n_ctx;
             }
         } else {
             if (cparams.n_batch > 16) {

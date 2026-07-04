@@ -13,6 +13,11 @@
 #include <android/log.h>
 #endif
 
+// Non-pthread Emscripten builds cannot spawn std::thread; log synchronously instead.
+#if defined(__EMSCRIPTEN__) && !defined(CAPLLAMA_BUILD_WASM_PTHREAD)
+#define CAPLLAMA_WASM_SYNC_LOG 1
+#endif
+
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
 
 void common_log_set_verbosity_thold(int verbosity) {
@@ -191,6 +196,27 @@ private:
     common_log_entry cur;
 
 public:
+    static void format_entry(common_log_entry & entry, enum lm_ggml_log_level level, bool use_prefix, bool use_timestamps, int64_t t_start, const char * fmt, va_list args) {
+        va_list args_copy;
+        va_copy(args_copy, args);
+
+        entry.msg.resize(256);
+        const size_t n = vsnprintf(entry.msg.data(), entry.msg.size(), fmt, args);
+        if (n >= entry.msg.size()) {
+            entry.msg.resize(n + 1);
+            vsnprintf(entry.msg.data(), entry.msg.size(), fmt, args_copy);
+        }
+        va_end(args_copy);
+
+        entry.level = level;
+        entry.prefix = use_prefix;
+        entry.timestamp = 0;
+        if (use_timestamps) {
+            entry.timestamp = t_us() - t_start;
+        }
+        entry.is_end = false;
+    }
+
     void add(enum lm_ggml_log_level level, const char * fmt, va_list args) {
         std::lock_guard<std::mutex> lock(mtx);
 
@@ -199,48 +225,16 @@ public:
             return;
         }
 
-        auto & entry = entries[tail];
-
-        {
-            // cannot use args twice, so make a copy in case we need to expand the buffer
-            va_list args_copy;
-            va_copy(args_copy, args);
-
-#if 1
-            const size_t n = vsnprintf(entry.msg.data(), entry.msg.size(), fmt, args);
-            if (n >= entry.msg.size()) {
-                entry.msg.resize(n + 1);
-                vsnprintf(entry.msg.data(), entry.msg.size(), fmt, args_copy);
-            }
+#ifdef CAPLLAMA_WASM_SYNC_LOG
+        common_log_entry entry;
+        format_entry(entry, level, prefix, timestamps, t_start, fmt, args);
+        entry.print();
+        if (file) {
+            entry.print(file);
+        }
 #else
-            // hack for bolding arguments
-
-            std::stringstream ss;
-            for (int i = 0; fmt[i] != 0; i++) {
-                if (fmt[i] == '%') {
-                    ss << LOG_COL_BOLD;
-                    while (fmt[i] != ' ' && fmt[i] != ')' && fmt[i] != ']' && fmt[i] != 0) ss << fmt[i++];
-                    ss << LOG_COL_DEFAULT;
-                    if (fmt[i] == 0) break;
-                }
-                ss << fmt[i];
-            }
-            const size_t n = vsnprintf(entry.msg.data(), entry.msg.size(), ss.str().c_str(), args);
-            if (n >= entry.msg.size()) {
-                entry.msg.resize(n + 1);
-                vsnprintf(entry.msg.data(), entry.msg.size(), ss.str().c_str(), args_copy);
-            }
-#endif
-            va_end(args_copy);
-        }
-
-        entry.level = level;
-        entry.prefix = prefix;
-        entry.timestamp = 0;
-        if (timestamps) {
-            entry.timestamp = t_us() - t_start;
-        }
-        entry.is_end = false;
+        auto & entry = entries[tail];
+        format_entry(entry, level, prefix, timestamps, t_start, fmt, args);
 
         tail = (tail + 1) % entries.size();
         if (tail == head) {
@@ -267,6 +261,7 @@ public:
         }
 
         cv.notify_one();
+#endif
     }
 
     void resume() {
@@ -278,6 +273,7 @@ public:
 
         running = true;
 
+#ifndef CAPLLAMA_WASM_SYNC_LOG
         thrd = std::thread([this]() {
             while (true) {
                 {
@@ -300,6 +296,7 @@ public:
                 }
             }
         });
+#endif
     }
 
     void pause() {
@@ -312,6 +309,7 @@ public:
 
             running = false;
 
+#ifndef CAPLLAMA_WASM_SYNC_LOG
             // push an entry to signal the worker thread to stop
             {
                 auto & entry = entries[tail];
@@ -321,9 +319,12 @@ public:
             }
 
             cv.notify_one();
+#endif
         }
 
+#ifndef CAPLLAMA_WASM_SYNC_LOG
         thrd.join();
+#endif
     }
 
     void set_file(const char * path) {
