@@ -576,14 +576,20 @@ function buildCompletionParamsJson(req_json) {
   if (!prompt.trim()) {
     throw new Error('No prompt or messages provided');
   }
-  return JSON.stringify({
+  const out = {
     prompt,
     n_predict: req.max_tokens ?? req.n_predict ?? 128,
     temperature: req.temperature ?? 0.7,
     top_p: req.top_p ?? 0.95,
     top_k: req.top_k ?? 40,
     stop: req.stop ?? [],
-  });
+  };
+  const repeat =
+    req.repeat_penalty ?? req.penalty_repeat ?? req.repeatPenalty;
+  if (typeof repeat === 'number' && Number.isFinite(repeat)) {
+    out.penalty_repeat = repeat;
+  }
+  return JSON.stringify(out);
 }
 
 function resolveCompletionFn() {
@@ -1487,8 +1493,8 @@ function wasmLinearMb() {
 
 const WASM_INITIAL_BYTES = 20 * 1024 * 1024;
 const WASM_MAX_BYTES = 2147483648;
-/** Practical browser pool cap — below Emscripten 2 GB hard max. */
-const WASM_POOL_CEILING_BYTES = 1536 * 1024 * 1024;
+/** WASM pool cap — aligned with Emscripten MAXIMUM_MEMORY (2 GiB). */
+const WASM_POOL_CEILING_BYTES = WASM_MAX_BYTES;
 const WASM_POOL_RESERVE_BYTES = 64 * 1024 * 1024;
 const WASM_MAX_CONCURRENT_MODELS = 5;
 const WASM_MIN_HEADROOM_BYTES = 128 * 1024 * 1024;
@@ -1598,11 +1604,12 @@ function checkWasmLoadAdmission(model_id, fileBytes, opts_json, mode) {
   const estimated = estimateModelWasmFootprint(fileBytes, memOpts);
   const projected = projectedWasmAfterLoad(id, fileBytes, memOpts);
   const linear = _mod?.HEAPU8?.length ?? _mod?.wasmMemory?.buffer?.byteLength ?? 0;
-  if (projected > WASM_POOL_CEILING_BYTES - WASM_POOL_RESERVE_BYTES) {
+  const admitLimit = WASM_MAX_BYTES - WASM_POOL_RESERVE_BYTES;
+  if (projected > admitLimit) {
     const ggufMb = (fileBytes / 1048576).toFixed(0);
     const linearMb = (linear / 1048576).toFixed(0);
     throw new Error(
-      '[llama-wasm] WASM pool would exceed ' + (WASM_POOL_CEILING_BYTES / 1048576).toFixed(0) +
+      '[llama-wasm] WASM pool would exceed ' + (WASM_MAX_BYTES / 1048576).toFixed(0) +
       ' MB (projected ' + (projected / 1048576).toFixed(0) +
       ' MB, heap now ' + linearMb + ' MB, GGUF ' + ggufMb + ' MB → est. +~' +
       (estimated / 1048576).toFixed(0) + ' MB for ' + id + ')',
@@ -1658,10 +1665,10 @@ function ensureWasmMemoryHeadroom(modelBytes, opts_json, mode, model_id) {
   } else {
     target = wasmMemoryTarget(modelsBytes, memOpts);
   }
-  if (target > WASM_POOL_CEILING_BYTES - WASM_POOL_RESERVE_BYTES) {
+  if (target > WASM_MAX_BYTES) {
     throw new Error(
-      '[llama-wasm] WASM pool would exceed ' + (WASM_POOL_CEILING_BYTES / 1048576).toFixed(0) +
-      ' MB (grow target ' + (target / 1048576).toFixed(0) + ' MB, heap now ' +
+      '[llama-wasm] WASM grow target exceeds Emscripten max ' + (WASM_MAX_BYTES / 1048576).toFixed(0) +
+      ' MB (requested ' + (target / 1048576).toFixed(0) + ' MB, heap now ' +
       (current / 1048576).toFixed(0) + ' MB)',
     );
   }

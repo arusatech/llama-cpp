@@ -40,13 +40,13 @@ describe('wasmMemoryPolicy', () => {
     expect(result.projectedWasmBytes).toBeLessThanOrEqual(1048 * 1024 * 1024);
   });
 
-  test('rejects when incremental load would exceed pool', () => {
+  test('rejects when incremental load would exceed 2 GB pool', () => {
     const result = canAdmitWasmModelLoad({
       modelId: 'lfm2_1_2b_rag_q4_k_m',
       fileBytes: 730_894_880,
       loadOpts: { n_ctx: 512, n_batch: 16 },
       currentlyLoaded: 1,
-      wasmLinearBytes: 941 * 1024 * 1024,
+      wasmLinearBytes: 1200 * 1024 * 1024,
     });
     expect(result.allow).toBe(false);
     expect(result.deniedBy).toBe('wasm_pool');
@@ -63,7 +63,7 @@ describe('wasmMemoryPolicy', () => {
     expect(result.allow).toBe(true);
   });
 
-  test('allows LFM2 solo load on empty worker (697 MB GGUF ≠ 1536 MB WASM)', () => {
+  test('allows LFM2 solo load on empty worker (697 MB GGUF fits 2 GB WASM pool)', () => {
     const result = canAdmitWasmModelLoad({
       modelId: 'lfm2_1_2b_rag_q4_k_m',
       fileBytes: 730_894_880,

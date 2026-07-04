@@ -4,11 +4,11 @@ import { projectWasmAfterLoad } from './wasmMemoryCalibration';
 /** Max concurrent GGUF contexts in one WASM worker (matches n_threads slot policy). */
 export const WASM_MAX_CONCURRENT_MODELS = 5;
 
-/** Practical browser WASM pool cap (below Emscripten 2 GB hard max). */
-export const WASM_POOL_CEILING_BYTES = 1536 * 1024 * 1024;
-
-/** Emscripten MAXIMUM_MEMORY — absolute hard limit from build. */
+/** Emscripten MAXIMUM_MEMORY — absolute hard limit from build (2 GiB). */
 export const WASM_EMSCRIPTEN_MAX_BYTES = 2147483648;
+
+/** WASM pool planning cap — aligned with Emscripten max (was 1536 MB). */
+export const WASM_POOL_CEILING_BYTES = WASM_EMSCRIPTEN_MAX_BYTES;
 
 /** Keep this much headroom free inside the WASM pool after a load. */
 export const WASM_POOL_RESERVE_BYTES = 64 * 1024 * 1024;
@@ -100,7 +100,7 @@ export function canAdmitWasmModelLoad(input: WasmLoadAdmissionInput): WasmLoadAd
     candidateEstimateBytes: estimated,
     candidateMeasuredBytes: input.candidateMeasuredBytes,
   });
-  const admitLimit = ceiling - reserve;
+  const admitLimit = Math.min(ceiling, WASM_EMSCRIPTEN_MAX_BYTES) - reserve;
 
   if (projectedWasm > admitLimit) {
     return {

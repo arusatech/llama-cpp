@@ -3,6 +3,7 @@
 #include "cap-tts.h"
 #include "cap-mtmd.hpp"
 #include <algorithm>  // For std::sort in speculative decoding
+#include <cmath>
 
 // Include multimodal support
 #include "tools/mtmd/mtmd.h"
@@ -67,6 +68,46 @@ static std::vector<llama_token> format_rerank(const llama_vocab * vocab, const s
     return result;
 }
 
+/** When the sampler picks EOG on the first new token, take the best non-EOG logit instead. */
+static llama_token sample_completion_token(
+    struct common_sampler * ctx_sampling,
+    llama_context * ctx,
+    const llama_vocab * vocab,
+    bool allow_eog)
+{
+    llama_token id = common_sampler_sample(ctx_sampling, ctx, -1);
+    if (allow_eog || !llama_vocab_is_eog(vocab, id)) {
+        return id;
+    }
+
+    const float * logits = llama_get_logits_ith(ctx, -1);
+    if (!logits) {
+        return id;
+    }
+
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+    llama_token best = LLAMA_TOKEN_NULL;
+    float best_logit = -INFINITY;
+    for (llama_token tid = 0; tid < n_vocab; ++tid) {
+        if (llama_vocab_is_eog(vocab, tid)) {
+            continue;
+        }
+        if (logits[tid] > best_logit) {
+            best_logit = logits[tid];
+            best = tid;
+        }
+    }
+
+    if (best != LLAMA_TOKEN_NULL && std::isfinite(best_logit)) {
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "@@WASM_GEN@@ first_token_eog=%d fallback=%d logit=%.3f\n",
+            id, best, best_logit);
+#endif
+        return best;
+    }
+    return id;
+}
+
 // Constructor
 llama_cap_context_completion::llama_cap_context_completion(llama_cap_context* parent)
     : parent_ctx(parent) {
@@ -99,6 +140,12 @@ void llama_cap_context_completion::rewind() {
     n_remain = 0;
     n_past = 0;
     embd.clear();
+    if (parent_ctx->ctx) {
+        llama_memory_t mem = llama_get_memory(parent_ctx->ctx);
+        if (mem) {
+            llama_memory_clear(mem, true);
+        }
+    }
     parent_ctx->params.sampling.n_prev = parent_ctx->n_ctx;
     if (parent_ctx->isVocoderEnabled()) {
         parent_ctx->tts_wrapper->audio_tokens.clear();
@@ -315,7 +362,9 @@ completion_token_output llama_cap_context_completion::nextToken()
         candidates.reserve(llama_vocab_n_tokens(vocab));
 #endif
 
-        llama_token new_token_id = common_sampler_sample(ctx_sampling, parent_ctx->ctx, -1);
+        const bool allow_eog = num_tokens_predicted > 0;
+        llama_token new_token_id = sample_completion_token(
+            ctx_sampling, parent_ctx->ctx, vocab, allow_eog);
 
         if (llama_vocab_is_eog(vocab, new_token_id)) {
             has_next_token = false;
