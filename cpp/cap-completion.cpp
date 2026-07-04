@@ -3,6 +3,7 @@
 #include "cap-tts.h"
 #include "cap-mtmd.hpp"
 #include <algorithm>  // For std::sort in speculative decoding
+#include <chrono>
 #include <cmath>
 
 // Include multimodal support
@@ -140,12 +141,6 @@ void llama_cap_context_completion::rewind() {
     n_remain = 0;
     n_past = 0;
     embd.clear();
-    if (parent_ctx->ctx) {
-        llama_memory_t mem = llama_get_memory(parent_ctx->ctx);
-        if (mem) {
-            llama_memory_clear(mem, true);
-        }
-    }
     parent_ctx->params.sampling.n_prev = parent_ctx->n_ctx;
     if (parent_ctx->isVocoderEnabled()) {
         parent_ctx->tts_wrapper->audio_tokens.clear();
@@ -249,6 +244,26 @@ void llama_cap_context_completion::loadPrompt(const std::vector<std::string> &me
             tokens_to_str(parent_ctx->ctx, embd.cbegin(), embd.cbegin() + n_past).c_str(),
             tokens_to_str(parent_ctx->ctx, embd.cbegin() + n_past, embd.cend()).c_str()
         );
+
+        // Prefill prompt here so the generate loop only samples new tokens.
+#ifdef __EMSCRIPTEN__
+        const auto prefill_t0 = std::chrono::steady_clock::now();
+#endif
+        while (n_past < (int) embd.size()) {
+            const int n_eval = std::min((int) embd.size() - n_past, parent_ctx->params.n_batch);
+            if (llama_decode(parent_ctx->ctx, llama_batch_get_one(embd.data() + n_past, n_eval))) {
+                LOG_ERROR("loadPrompt: prefill decode failed at n_past=%d n_eval=%d", n_past, n_eval);
+                has_next_token = false;
+                return;
+            }
+            n_past += n_eval;
+        }
+#ifdef __EMSCRIPTEN__
+        const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - prefill_t0).count();
+        fprintf(stderr, "@@WASM_GEN@@ prefill_done tokens=%zu n_batch=%d ms=%lld\n",
+            embd.size(), parent_ctx->params.n_batch, (long long) prefill_ms);
+#endif
     } else {
         // Multimodal path - process all media paths
         processMedia(parent_ctx->params.prompt, media_paths);

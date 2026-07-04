@@ -450,8 +450,13 @@ int64_t llama_init_context(const char * model_path, const char * params_json) {
                 cparams.n_batch = cparams.n_ctx;
             }
         } else {
-            if (cparams.n_batch > 16) {
-                cparams.n_batch = 16;
+            // Larger batches = fewer WASM decode round-trips during prompt prefill.
+            if (cparams.n_batch <= 0 || cparams.n_batch < 32) {
+                cparams.n_batch = std::min(cparams.n_ctx, 128);
+            } else if (cparams.n_batch > cparams.n_ctx) {
+                cparams.n_batch = cparams.n_ctx;
+            } else if (cparams.n_batch > 128) {
+                cparams.n_batch = 128;
             }
             if (cparams.n_ctx > 512) {
                 cparams.n_ctx = 512;
@@ -554,8 +559,8 @@ const char * llama_completion(int64_t context_id, const char * params_json) {
             }
 #ifdef __EMSCRIPTEN__
             const auto t0 = std::chrono::steady_clock::now();
-            fprintf(stderr, "@@WASM_GEN@@ prompt_ok tokens=%zu n_predict=%d n_past=%d\n",
-                prompt_tokens.size(), n_predict, ctx->completion->n_past);
+            fprintf(stderr, "@@WASM_GEN@@ prompt_ok tokens=%zu n_predict=%d n_past=%d n_batch=%d\n",
+                prompt_tokens.size(), n_predict, ctx->completion->n_past, ctx->params.n_batch);
 #endif
             tokens_generated = run_completion_loop(ctx, n_predict, hit_eos, generated_text);
 
