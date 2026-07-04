@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Build llama-cpp.xcframework (device + simulator) for Capacitor iOS / SPM consumers.
-# Run from the plugin repo root, or from a consumer app via:
+# Build llama-cpp.xcframework (device + simulator) inside this npm package.
+#
+# Consumer Capacitor apps — run from app root after npm install (do not copy this file):
 #   bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
+#
+# Plugin developers — from this repo:
+#   npm run build:ios:xcframework
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

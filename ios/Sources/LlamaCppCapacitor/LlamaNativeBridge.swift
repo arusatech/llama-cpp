@@ -11,7 +11,7 @@ enum LlamaNativeBridge {
         var errorDescription: String? {
             switch self {
             case .missingSymbol(let symbol):
-                return "Native symbol \(symbol) is not linked. Rebuild llama-cpp.framework and run npm run ios:prepare."
+                return "Native symbol \(symbol) is not linked. Rebuild llama-cpp.framework (bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh from your app root)."
             case .modelNotFound(let path):
                 return "Model file not found at \(path)"
             case .initializationFailed(let details):

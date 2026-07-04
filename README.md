@@ -279,14 +279,14 @@ npx cap add ios
 npx cap sync ios
 ```
 
-**Simulator builds** (macOS + Xcode + cmake): build a device+simulator xcframework once, then re-sync:
+**Simulator builds** (macOS + Xcode + cmake): from your **Capacitor app root** (after `npm install`), build device+simulator slices once, then re-sync. Use the script shipped inside the plugin — do not copy it into your app:
 
 ```sh
 bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
 npx cap sync ios
 ```
 
-Or from a local plugin checkout: `npm run build:ios:xcframework`
+When developing the plugin itself (git checkout): `npm run build:ios:xcframework`
 
 3. Open the project in Xcode:
 ```sh
