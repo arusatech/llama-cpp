@@ -23,8 +23,11 @@ let package = Package(
             // Note: This target uses a pre-built llama-cpp.framework
             // For building locally, use: ./build-variants.sh --variant minimal
             // See BUILD_GUIDE.md for complete build documentation
-            publicHeadersPath: "."),
-
+            publicHeadersPath: ".",
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("Accelerate")
+            ]),
         .testTarget(
             name: "LlamaCppPluginTests",
             dependencies: ["LlamaCppPlugin"],

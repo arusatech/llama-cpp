@@ -39,6 +39,8 @@ set(SOURCE_FILES_ARCH
 set(PUBLIC_HEADERS
     ${SOURCE_DIR}/cap-llama.h
     ${SOURCE_DIR}/cap-completion.h
+    ${SOURCE_DIR}/cap-embedding.h
+    ${SOURCE_DIR}/cap-ios-bridge.h
     ${SOURCE_DIR}/cap-tts.h
     ${SOURCE_DIR}/llama.h
     ${SOURCE_DIR}/ggml.h

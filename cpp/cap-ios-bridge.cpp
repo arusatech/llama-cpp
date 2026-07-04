@@ -2,6 +2,8 @@
 
 #include "cap-llama.h"
 #include "cap-completion.h"
+#include "cap-embedding.h"
+#include "cap-ios-bridge.h"
 #include "json-schema-to-grammar.h"
 
 #include <chrono>
@@ -53,6 +55,22 @@ capllama::llama_cap_context * get_ctx(int64_t id) {
     return it->second.get();
 }
 
+llama_model * resolve_model(capllama::llama_cap_context * ctx) {
+    if (!ctx) {
+        return nullptr;
+    }
+    if (ctx->model) {
+        return ctx->model;
+    }
+    if (ctx->ctx) {
+        return const_cast<llama_model *>(llama_get_model(ctx->ctx));
+    }
+    if (ctx->llama_init.model) {
+        return ctx->llama_init.model.get();
+    }
+    return nullptr;
+}
+
 void apply_params_json(common_params & cparams, const json * j) {
     if (!j || !j->is_object()) {
         return;
@@ -83,6 +101,19 @@ void apply_params_json(common_params & cparams, const json * j) {
         }
         if (p.contains("chat_template") && p["chat_template"].is_string()) {
             cparams.chat_template = p["chat_template"].get<std::string>();
+        }
+        if (p.contains("pooling_type")) {
+            if (p["pooling_type"].is_number_integer()) {
+                const int pooling_type_int = p["pooling_type"].get<int>();
+                if (pooling_type_int > 0) {
+                    cparams.embedding = true;
+                }
+            } else if (p["pooling_type"].is_string()) {
+                const std::string pooling_type_str = p["pooling_type"].get<std::string>();
+                if (!pooling_type_str.empty() && pooling_type_str != "none") {
+                    cparams.embedding = true;
+                }
+            }
         }
     } catch (...) {
     }
@@ -365,6 +396,111 @@ int run_completion_loop(
     return tokens_generated;
 }
 
+char * dup_c_string(const std::string & value) {
+    char * buffer = new (std::nothrow) char[value.size() + 1];
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+    std::memcpy(buffer, value.c_str(), value.size() + 1);
+    return buffer;
+}
+
+std::vector<std::string> read_media_paths_json(const json & root) {
+    std::vector<std::string> media_paths;
+    if (!root.contains("media_paths") || !root["media_paths"].is_array()) {
+        return media_paths;
+    }
+    for (const auto & item : root["media_paths"]) {
+        if (item.is_string()) {
+            media_paths.push_back(item.get<std::string>());
+        }
+    }
+    return media_paths;
+}
+
+json build_run_completion_result(capllama::llama_cap_context_completion & completion) {
+    const auto partial = completion.getPartialOutput("");
+    const std::string text = !partial.content.empty() ? partial.content : completion.generated_text;
+
+    json timings = {
+        {"prompt_n", completion.num_prompt_tokens},
+        {"prompt_ms", 0},
+        {"prompt_per_token_ms", 0},
+        {"prompt_per_second", 0},
+        {"predicted_n", completion.num_tokens_predicted},
+        {"predicted_ms", 0},
+        {"predicted_per_token_ms", 0},
+        {"predicted_per_second", 0},
+    };
+
+    if (completion.parent_ctx != nullptr && completion.parent_ctx->ctx != nullptr) {
+        const auto perf = llama_perf_context(completion.parent_ctx->ctx);
+        timings["prompt_ms"] = perf.t_p_eval_ms;
+        timings["predicted_ms"] = perf.t_eval_ms;
+        if (completion.num_prompt_tokens > 0 && perf.t_p_eval_ms > 0) {
+            timings["prompt_per_token_ms"] = perf.t_p_eval_ms / completion.num_prompt_tokens;
+            timings["prompt_per_second"] = completion.num_prompt_tokens / (perf.t_p_eval_ms / 1000.0);
+        }
+        if (completion.num_tokens_predicted > 0 && perf.t_eval_ms > 0) {
+            timings["predicted_per_token_ms"] = perf.t_eval_ms / completion.num_tokens_predicted;
+            timings["predicted_per_second"] = completion.num_tokens_predicted / (perf.t_eval_ms / 1000.0);
+        }
+    }
+
+    return {
+        {"text", text},
+        {"reasoning_content", partial.reasoning_content},
+        {"tool_calls", json::array()},
+        {"content", text},
+        {"chat_format", completion.current_chat_format},
+        {"tokens_predicted", completion.num_tokens_predicted},
+        {"tokens_evaluated", completion.num_prompt_tokens},
+        {"truncated", completion.truncated},
+        {"stopped_eos", completion.stopped_eos},
+        {"stopped_word", completion.stopped_word},
+        {"stopped_limit", completion.stopped_limit},
+        {"stopping_word", completion.stopping_word},
+        {"context_full", completion.context_full},
+        {"interrupted", completion.is_interrupted},
+        {"tokens_cached", 0},
+        {"timings", timings},
+    };
+}
+
+void apply_run_completion_params(common_params & params, const json & root) {
+    if (root.contains("prompt") && root["prompt"].is_string()) {
+        params.prompt = root["prompt"].get<std::string>();
+    }
+    if (root.contains("n_predict") && root["n_predict"].is_number_integer()) {
+        params.n_predict = root["n_predict"].get<int>();
+    } else if (params.n_predict < 0) {
+        params.n_predict = 128;
+    }
+    if (root.contains("stop") && root["stop"].is_array()) {
+        params.antiprompt.clear();
+        for (const auto & item : root["stop"]) {
+            if (item.is_string()) {
+                params.antiprompt.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (root.contains("temperature") && root["temperature"].is_number()) {
+        params.sampling.temp = root["temperature"].get<float>();
+    }
+    if (root.contains("top_p") && root["top_p"].is_number()) {
+        params.sampling.top_p = root["top_p"].get<float>();
+    }
+    if (root.contains("top_k") && root["top_k"].is_number_integer()) {
+        params.sampling.top_k = root["top_k"].get<int>();
+    }
+    if (root.contains("repeat_penalty") && root["repeat_penalty"].is_number()) {
+        params.sampling.penalty_repeat = root["repeat_penalty"].get<float>();
+    }
+    if (root.contains("seed") && root["seed"].is_number_integer()) {
+        params.sampling.seed = root["seed"].get<uint32_t>();
+    }
+}
+
 } // namespace
 
 extern "C" {
@@ -384,6 +520,9 @@ int64_t llama_init_context(const char * model_path, const char * params_json) {
         }
 
         std::string primary(model_path);
+        if (primary.rfind("file://", 0) == 0) {
+            primary.erase(0, 7);
+        }
         const json * pj = params_j.is_object() ? &params_j : nullptr;
         std::string full_model_path = resolve_model_path(primary, pj);
         if (full_model_path.empty()) {
@@ -462,6 +601,18 @@ int64_t llama_init_context(const char * model_path, const char * params_json) {
                 cparams.n_ctx = 512;
             }
         }
+#else
+        if (cparams.embedding) {
+            cparams.ctx_shift = false;
+            if (cparams.n_ctx > 512) {
+                cparams.n_ctx = 512;
+            }
+            if (cparams.n_batch <= 0 || cparams.n_batch < cparams.n_ctx) {
+                cparams.n_batch = cparams.n_ctx;
+            } else if (cparams.n_batch > cparams.n_ctx) {
+                cparams.n_batch = cparams.n_ctx;
+            }
+        }
 #endif
 
         if (!load_with_fallback(context, cparams)) {
@@ -500,23 +651,35 @@ void llama_release_context(int64_t context_id) {
     }
 }
 
+int32_t llama_context_n_embd(int64_t context_id) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto * ctx = get_ctx(context_id);
+    llama_model * model = resolve_model(ctx);
+    if (!model) {
+        return 0;
+    }
+    return llama_model_n_embd(model);
+}
+
 const char * llama_get_context_model_json(int64_t context_id) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto * ctx = get_ctx(context_id);
-    if (!ctx || !ctx->model) {
+    llama_model * model = resolve_model(ctx);
+    if (!ctx || !model) {
+        fprintf(stderr, "llama_get_context_model_json: no model for context %lld\n", (long long) context_id);
         return tls_cstr("{}");
     }
     try {
-        int64_t size = 0;
-        if (!ctx->params.model.path.empty() && std::filesystem::exists(ctx->params.model.path)) {
+        int64_t size = static_cast<int64_t>(llama_model_size(model));
+        if (size <= 0 && !ctx->params.model.path.empty() && std::filesystem::exists(ctx->params.model.path)) {
             size = static_cast<int64_t>(std::filesystem::file_size(ctx->params.model.path));
         }
         json out = {
             {"path", ctx->params.model.path},
             {"desc", std::string("GGUF model")},
             {"size", size},
-            {"nEmbd", llama_model_n_embd(ctx->model)},
-            {"nParams", static_cast<int64_t>(llama_model_n_params(ctx->model))},
+            {"nEmbd", llama_model_n_embd(model)},
+            {"nParams", static_cast<int64_t>(llama_model_n_params(model))},
             {"chatTemplates", default_chat_templates_json()},
             {"metadata", json::object()},
         };
@@ -1440,6 +1603,88 @@ const char * llama_cap_decode_audio_tokens(int64_t context_id, const char * toke
     } catch (const std::exception & e) {
         json err = {{"error", e.what()}};
         return tls_cstr(err.dump());
+    }
+}
+
+char * llama_run_completion(int64_t context_id, const char * params_json) {
+    try {
+        json root = json::object();
+        if (params_json != nullptr && params_json[0] != '\0') {
+            root = json::parse(params_json);
+        }
+
+        capllama::llama_cap_context * context = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            context = get_ctx(context_id);
+        }
+        if (context == nullptr || context->completion == nullptr) {
+            return nullptr;
+        }
+
+        if (context->params.embedding ||
+            (context->ctx != nullptr && llama_pooling_type(context->ctx) != LLAMA_POOLING_TYPE_NONE)) {
+            return nullptr;
+        }
+
+        apply_run_completion_params(context->params, root);
+        const std::vector<std::string> media_paths = read_media_paths_json(root);
+        capllama::llama_cap_context_completion & completion = *context->completion;
+
+        completion.rewind();
+        if (!completion.initSampling()) {
+            return nullptr;
+        }
+        completion.loadPrompt(media_paths);
+        completion.beginCompletion();
+        while (completion.has_next_token && !completion.is_interrupted) {
+            completion.doCompletion();
+        }
+        completion.endCompletion();
+
+        return dup_c_string(build_run_completion_result(completion).dump());
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void llama_free_completion_result(char * result_json) {
+    delete[] result_json;
+}
+
+char * llama_run_embedding_json(int64_t context_id, const char * text, const char * params_json) {
+    if (text == nullptr || text[0] == '\0') {
+        return nullptr;
+    }
+    try {
+        const char * params = (params_json != nullptr && params_json[0] != '\0') ? params_json : "{}";
+        float * vec = llama_embedding(context_id, text, params);
+        if (vec == nullptr) {
+            return nullptr;
+        }
+
+        capllama::llama_cap_context * ctx = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            ctx = get_ctx(context_id);
+        }
+        llama_model * model = resolve_model(ctx);
+        if (model == nullptr) {
+            return nullptr;
+        }
+        const int32_t n_embd = llama_model_n_embd(model);
+        if (n_embd <= 0) {
+            return nullptr;
+        }
+
+        json arr = json::array();
+        for (int32_t i = 0; i < n_embd; ++i) {
+            arr.push_back(static_cast<double>(vec[i]));
+        }
+        json out = {{"embedding", arr}};
+        return dup_c_string(out.dump());
+    } catch (...) {
+        return nullptr;
     }
 }
 
