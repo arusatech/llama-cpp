@@ -71,27 +71,24 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_chatNative(
         if (params != nullptr) {
             jclass jsObjectClass = env->GetObjectClass(params);
             jmethodID getIntegerMethod = env->GetMethodID(jsObjectClass, "getInteger", "(Ljava/lang/String;)Ljava/lang/Integer;");
-            jmethodID getDoubleMethod = env->GetMethodID(jsObjectClass, "getDouble", "(Ljava/lang/String;)Ljava/lang/Double;");
-            
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                getIntegerMethod = nullptr;
+            }
+
             if (getIntegerMethod != nullptr) {
                 jstring key = jni_utils::string_to_jstring(env, "n_predict");
                 jobject val = env->CallObjectMethod(params, getIntegerMethod, key);
-                if (val != nullptr) {
+                if (val != nullptr && !env->ExceptionCheck()) {
                     n_predict = env->CallIntMethod(val, env->GetMethodID(env->FindClass("java/lang/Integer"), "intValue", "()I"));
                     env->DeleteLocalRef(val);
+                } else if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
                 }
                 env->DeleteLocalRef(key);
             }
-            
-            if (getDoubleMethod != nullptr) {
-                jstring key = jni_utils::string_to_jstring(env, "temperature");
-                jobject val = env->CallObjectMethod(params, getDoubleMethod, key);
-                if (val != nullptr) {
-                    temperature = env->CallDoubleMethod(val, env->GetMethodID(env->FindClass("java/lang/Double"), "doubleValue", "()D"));
-                    env->DeleteLocalRef(val);
-                }
-                env->DeleteLocalRef(key);
-            }
+
+            temperature = jni_utils::jsobject_opt_double(env, params, "temperature", temperature);
         }
         
         // Run completion with formatted prompt
@@ -207,17 +204,24 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_generateTextNative(
         if (params != nullptr) {
             jclass jsObjectClass = env->GetObjectClass(params);
             jmethodID getIntegerMethod = env->GetMethodID(jsObjectClass, "getInteger", "(Ljava/lang/String;)Ljava/lang/Integer;");
-            jmethodID getDoubleMethod = env->GetMethodID(jsObjectClass, "getDouble", "(Ljava/lang/String;)Ljava/lang/Double;");
-            
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                getIntegerMethod = nullptr;
+            }
+
             if (getIntegerMethod != nullptr) {
                 jstring key = jni_utils::string_to_jstring(env, "n_predict");
                 jobject val = env->CallObjectMethod(params, getIntegerMethod, key);
-                if (val != nullptr) {
+                if (val != nullptr && !env->ExceptionCheck()) {
                     n_predict = env->CallIntMethod(val, env->GetMethodID(env->FindClass("java/lang/Integer"), "intValue", "()I"));
                     env->DeleteLocalRef(val);
+                } else if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
                 }
                 env->DeleteLocalRef(key);
             }
+
+            temperature = jni_utils::jsobject_opt_double(env, params, "temperature", temperature);
         }
         
         LOGI("Generate text prompt: %s, n_predict: %d", prompt_str.c_str(), n_predict);

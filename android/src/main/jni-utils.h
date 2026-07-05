@@ -56,6 +56,15 @@ void throw_java_exception(JNIEnv* env, const char* class_name, const char* messa
 // Check if exception occurred
 bool check_exception(JNIEnv* env);
 
+/** Capacitor 8+ JSObject has no getDouble(); read via inherited JSONObject.optDouble. */
+double jsobject_opt_double(JNIEnv* env, jobject jso, const char* key, double default_value);
+
+/** Capacitor 8+ JSObject has no getBoolean(String); read via inherited JSONObject.optBoolean. */
+bool jsobject_opt_bool(JNIEnv* env, jobject jso, const char* key, bool default_value);
+
+/** Read optional string via inherited JSONObject.optString. */
+std::string jsobject_opt_string(JNIEnv* env, jobject jso, const char* key, const std::string& default_value);
+
 // Get field ID safely
 jfieldID get_field_id(JNIEnv* env, jclass clazz, const char* name, const char* sig);
 
