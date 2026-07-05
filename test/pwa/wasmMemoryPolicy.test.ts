@@ -41,12 +41,14 @@ describe('wasmMemoryPolicy', () => {
   });
 
   test('rejects when incremental load would exceed 2 GB pool', () => {
+    // Footprint-based admission: resident footprint + candidate estimate (not inflated linear).
     const result = canAdmitWasmModelLoad({
       modelId: 'lfm2_1_2b_rag_q4_k_m',
       fileBytes: 730_894_880,
       loadOpts: { n_ctx: 512, n_batch: 16 },
       currentlyLoaded: 1,
-      wasmLinearBytes: 1200 * 1024 * 1024,
+      loadedFootprintBytes: 1200 * 1024 * 1024,
+      wasmLinearBytes: 2048 * 1024 * 1024,
     });
     expect(result.allow).toBe(false);
     expect(result.deniedBy).toBe('wasm_pool');

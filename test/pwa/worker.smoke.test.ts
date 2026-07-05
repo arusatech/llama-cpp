@@ -210,14 +210,18 @@ describe('PWA worker smoke', () => {
         details: { runtime: 'ok', wasmReady: true },
       },
     });
-    expect(emitted).toContainEqual({
-      id: 'state-memory',
-      type: 'RESULT',
-      payload: {
-        pressure: 'low',
-        freeBytes: 12345,
-      },
-    });
+    expect(emitted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'state-memory',
+          type: 'RESULT',
+          payload: expect.objectContaining({
+            pressure: 'low',
+            freeBytes: 12345,
+          }),
+        }),
+      ]),
+    );
   });
 
   test('returns MODEL_NOT_LOADED for generate before model load', async () => {

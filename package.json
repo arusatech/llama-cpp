@@ -1,6 +1,6 @@
 {
   "name": "llama-cpp-capacitor",
-  "version": "0.2.0-rc.0",
+  "version": "0.2.0",
   "description": "A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference with chat-first API design. Complete iOS and Android support: text generation, chat, multimodal, TTS, LoRA, embeddings, and more.",
   "main": "dist/plugin.cjs.js",
   "type": "module",
@@ -109,6 +109,8 @@
     "prepack": "npm run build:package && npm run verify:pack:artifacts",
     "pack": "npm pack --dry-run",
     "pack:full": "npm run build:package:full && npm run verify:pack:artifacts && npm pack --ignore-scripts",
+    "release:pack": "npm run build:wasm:assets && npm run verify:pack:artifacts && npm pack --ignore-scripts",
+    "release:0.2.0": "npm run build:package:full && npm run verify:pwa && npm run release:pack",
     "test": "jest",
     "test:pwa:smoke": "jest --config test/jest.pwa.config.cjs",
     "verify:pwa": "npx tsc -p tsconfig.json --noEmit && npm run test:pwa:smoke",
