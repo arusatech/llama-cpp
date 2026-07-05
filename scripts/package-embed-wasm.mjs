@@ -1568,7 +1568,7 @@ function isModelResidentInWasm(model_id) {
   return _loadedModelBytes.has(id) || _modelContextIds.has(id);
 }
 
-/** Projected linear bytes after loading one more model (incremental — no double-count). */
+/** Projected pool usage after loading one more model (footprint-based — no double-count). */
 function projectedWasmAfterLoad(model_id, fileBytes, memOpts) {
   const id = String(model_id);
   const linear = _mod?.HEAPU8?.length ?? _mod?.wasmMemory?.buffer?.byteLength ?? 0;
@@ -1578,13 +1578,16 @@ function projectedWasmAfterLoad(model_id, fileBytes, memOpts) {
   const estimated = estimateModelWasmFootprint(fileBytes, memOpts);
   const residentCount = _loadedModelBytes.size;
   const residentFootprint = loadedModelsFootprintBytes(id);
+  // Prefer calibrated footprints over linear heap size. Linear may already include
+  // unused pre-grown headroom (or a prior failed grow to MAXIMUM_MEMORY), so
+  // linear+estimated falsely rejects BGE+LFM2 co-residence inside 2 GiB.
   if (residentCount > 0) {
-    return linear + estimated;
+    return residentFootprint + estimated;
   }
   if (linear > 64 * 1024 * 1024) {
-    return Math.max(linear, estimated);
+    return estimated;
   }
-  return Math.max(linear, residentFootprint, estimated);
+  return Math.max(linear, estimated);
 }
 
 /** Reject load before grow when pool ceiling or slot limit would be exceeded. */
@@ -1715,7 +1718,10 @@ function heapfsStreamBegin(totalBytes, opts_json) {
 function asyncFileStreamBegin(totalBytes, opts_json) {
   patchHeapFS();
   enableAsyncFileEnv();
-  if (typeof totalBytes === 'number' && totalBytes > 0) {
+  // Cold load only: pre-grow here. When another model is resident, admission + grow
+  // run in load_model_from_vfs (after checkWasmLoadAdmission) so we do not inflate
+  // linear to MAXIMUM_MEMORY and then reject with linear+estimated.
+  if (typeof totalBytes === 'number' && totalBytes > 0 && _loadedModelBytes.size === 0) {
     const loadOpts = vfsLoadOptsJson(opts_json ?? '{}', 'async', totalBytes);
     ensureWasmMemoryHeadroom(totalBytes, loadOpts, 'async');
   }

@@ -90,16 +90,18 @@ export function sumResidentFootprintBytes(
   return sum;
 }
 
-/** Project WASM linear bytes after admitting one more model. */
+/** Project WASM pool usage after admitting one more model (footprint-based). */
 export function projectWasmAfterLoad(input: WasmProjectionInput): number {
   const linear = input.wasmLinearBytes;
   const nextBytes = input.candidateMeasuredBytes ?? input.candidateEstimateBytes;
 
+  // Prefer calibrated footprints over linear heap size. Linear may include unused
+  // pre-grown headroom (or a prior failed grow to MAXIMUM_MEMORY).
   if (input.residentModelCount > 0) {
-    return linear + nextBytes;
+    return input.residentFootprintBytes + nextBytes;
   }
   if (linear > WARM_HEAP_BYTES) {
-    return Math.max(linear, nextBytes);
+    return nextBytes;
   }
-  return Math.max(linear, input.residentFootprintBytes, nextBytes);
+  return Math.max(linear, nextBytes);
 }
