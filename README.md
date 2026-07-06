@@ -3,11 +3,12 @@
 [![Actions Status](https://github.com/arusatech/llama-cpp/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
-[![Support: ANNADATA.AI](https://img.shields.io/badge/SupportBy-ANNADATA.AI-orange.svg)](https://annadata.ai/)
+[![Support: ANNADATA.AI](https://img.shields.io/badge/AI-ANNADATA.AI-orange.svg)](https://annadata.ai/)
+[![Principal Engineer / Architect: Mr. Yakub Mohammad](https://img.shields.io/badge/Principal%20Architect-Mr.%20Yakub%20Mohammad-blue.svg)](https://annadata.ai/)
 
 A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
 
-[![Principal Engineer / Architect: Mr. Yakub Mohammad](https://img.shields.io/badge/Principal%20Engineer%2FArchitect-Mr.%20Yakub%20Mohammad-blue.svg)](https://annadata.ai/)
+
 
 [llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++
 
