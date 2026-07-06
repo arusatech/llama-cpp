@@ -3,8 +3,10 @@
 [![Actions Status](https://github.com/arusatech/llama-cpp/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
+[![Sponsor: ANNADATA.AI](https://annadata.ai/favicon.ico)](https://annadata.ai/)
 
-A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
+A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more - Architect Mr. Yakub Mohammad (annadata.ai).
+[annadata](https://annadata.ai)
 
 [llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++
 
@@ -22,6 +24,34 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 - **Benchmarking**: Performance testing and optimization tools
 - **Structured Output**: Generate JSON with schema validation
 - **Cross-Platform**: iOS, Android, and **Web/PWA** (WASM + OPFS) with native optimizations
+
+## 📱 Platform Support
+
+| Feature | iOS | Android | Web (PWA) |
+|---------|-----|---------|-----------|
+| Text Generation | ✅ | ✅ | ✅ |
+| Chat Conversations | ✅ | ✅ | ✅ |
+| Streaming | ✅ | ✅ | ✅ |
+| Multimodal | ✅ | ✅ | ✅¹ |
+| TTS | ✅ | ✅ | ✅¹ |
+| LoRA Adapters | ✅ | ✅ | ✅¹ |
+| Embeddings | ✅ | ✅ | ✅ |
+| Reranking | ✅ | ✅ | ✅² |
+| Session Management | ✅ | ✅ | ✅³ |
+| Benchmarking | ✅ | ✅ | ✅ |
+
+¹ **Web:** auxiliary GGUF files (mmproj, vocoder, LoRA) must be staged in the WASM VFS (e.g. via OPFS download → `/tmp/` path). GPU offload is not available in browser WASM.
+
+² **Web:** requires a rank-pooling embedding model (same as native).
+
+³ **Web:** sessions persist in the worker MEMFS `/tmp/` for the lifetime of the WASM worker tab session.
+
+### PWA requirements
+
+- **OPFS** for model storage (`navigator.storage.getDirectory`)
+- **Dedicated worker** for inference (included in the package)
+- **COOP/COEP** optional — enables pthread builds; single-threaded WASM works without it
+- Rebuild WASM after updating: `npm run build:pwa:full`
 
 ## ✅ **Complete Implementation Status**
 
@@ -661,34 +691,6 @@ interface CompletionParams {
 }
 ```
 
-## 📱 Platform Support
-
-| Feature | iOS | Android | Web (PWA) |
-|---------|-----|---------|-----------|
-| Text Generation | ✅ | ✅ | ✅ |
-| Chat Conversations | ✅ | ✅ | ✅ |
-| Streaming | ✅ | ✅ | ✅ |
-| Multimodal | ✅ | ✅ | ✅¹ |
-| TTS | ✅ | ✅ | ✅¹ |
-| LoRA Adapters | ✅ | ✅ | ✅¹ |
-| Embeddings | ✅ | ✅ | ✅ |
-| Reranking | ✅ | ✅ | ✅² |
-| Session Management | ✅ | ✅ | ✅³ |
-| Benchmarking | ✅ | ✅ | ✅ |
-
-¹ **Web:** auxiliary GGUF files (mmproj, vocoder, LoRA) must be staged in the WASM VFS (e.g. via OPFS download → `/tmp/` path). GPU offload is not available in browser WASM.
-
-² **Web:** requires a rank-pooling embedding model (same as native).
-
-³ **Web:** sessions persist in the worker MEMFS `/tmp/` for the lifetime of the WASM worker tab session.
-
-### PWA requirements
-
-- **OPFS** for model storage (`navigator.storage.getDirectory`)
-- **Dedicated worker** for inference (included in the package)
-- **COOP/COEP** optional — enables pthread builds; single-threaded WASM works without it
-- Rebuild WASM after updating: `npm run build:pwa:full`
-
 ## 🎨 Advanced Examples
 
 ### Multimodal Processing
@@ -926,6 +928,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 Email: support@arusatech.com
+- 📧 Email: support@arusatech.com ; yakub@annadata.ai
 - 🐛 Issues: [GitHub Issues](https://github.com/arusatech/llama-cpp/issues)
 - 📖 Documentation: [GitHub Wiki](https://github.com/arusatech/llama-cpp/wiki)
