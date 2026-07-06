@@ -10,7 +10,7 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 
 
 
-[llama.cpp](https://github.com/ggerganov/llama.cpp): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++
+[Annadata.ai](https://annadata.ai): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++ used in [Annadata.ai](https://annadata.ai)
 
 ## 🚀 Features
 
@@ -927,6 +927,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) - The core inference engine
 - [Capacitor](https://capacitorjs.com/) - The cross-platform runtime
 - [llama.rn](https://github.com/mybigday/llama.rn) - Inspiration for the React Native implementation
+- [Annadata.ai](https://annadata.ai) - Complete system developed and powered by [![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
 
 ## 📞 Support
 
