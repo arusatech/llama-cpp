@@ -61,6 +61,7 @@
     "scripts/build-sidecar-linux.sh",
     "scripts/build-sidecar-win.bat"
   ],
+  "readme": "README.md",
   "author": "Mr. Yakub Mohammad <yakub@annadata.ai> (yakub@arusatech.com, yakub@arusallc.com)",
   "license": "MIT",
   "repository": {
@@ -153,7 +154,7 @@
     "clean:all": "npm run clean && npm run clean:native && npm run clean:wasm",
     "clean:test": "rimraf test/output test/coverage",
     "watch": "tsc --watch",
-    "prepublishOnly": "npm run build:package"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",
