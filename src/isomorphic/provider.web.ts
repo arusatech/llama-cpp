@@ -6,6 +6,7 @@ import type {
   InitializeOptions,
   LlmProvider,
   MemorySnapshot,
+  PlatformKind,
   TokenEvent,
 } from './provider.interface';
 import type { DetokenizeResult, TokenizeResult } from '../workers/wasm.engine';
@@ -146,7 +147,7 @@ async function getMemorySnapshotCrossBrowser(): Promise<MemorySnapshot> {
 // ---------------------------------------------------------------------------
 export class WebProvider implements LlmProvider {
   private static globalWorkerFactory?: WorkerFactory;
-  readonly platform = 'web' as const;
+  readonly platform: PlatformKind = 'web';
   private loadedModelIds = new Set<string>();
   private worker: Worker | null = null;
   private reqCounter = 0;

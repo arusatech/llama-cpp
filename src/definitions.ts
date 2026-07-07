@@ -33,11 +33,11 @@ export interface NativeContextParams {
   mobile_speculative?: boolean;
 
   /**
-   * Number of layers to store in VRAM (Currently only for iOS)
+   * Number of layers to offload to GPU (iOS, Android, Desktop)
    */
   n_gpu_layers?: number;
   /**
-   * Skip GPU devices (iOS only)
+   * Skip GPU devices (iOS, Android, Desktop force-CPU mode)
    */
   no_gpu_devices?: boolean;
 

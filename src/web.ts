@@ -109,17 +109,17 @@ function vfsPathForWeb(filepath: string): string {
 }
 
 export class LlamaCppWeb implements LlamaCppPlugin {
-  private provider = new WebProvider();
+  protected provider: WebProvider = new WebProvider();
   // contextId → modelId
-  private contextToModel = new Map<number, string>();
+  protected contextToModel = new Map<number, string>();
   // eventName → Set of listener callbacks
-  private listeners = new Map<string, Set<(data: unknown) => void>>();
+  protected listeners = new Map<string, Set<(data: unknown) => void>>();
 
-  private emitListener(eventName: string, data: unknown): void {
+  protected emitListener(eventName: string, data: unknown): void {
     this.listeners.get(eventName)?.forEach((cb) => cb(data));
   }
 
-  private hasListeners(eventName: string): boolean {
+  protected hasListeners(eventName: string): boolean {
     const set = this.listeners.get(eventName);
     return !!set && set.size > 0;
   }
@@ -662,8 +662,13 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   // -------------------------------------------------------------------------
   // Native server (not available on web)
   // -------------------------------------------------------------------------
-  async startNativeLlamaServer(): Promise<{ running: boolean }> {
-    throw new Error('LlamaCppWeb: native server is only available on iOS/Android');
+  async startNativeLlamaServer(_options?: {
+    modelPath: string;
+    host?: string;
+    port?: number;
+    params?: import('./definitions').NativeContextParams;
+  }): Promise<{ running: boolean }> {
+    throw new Error('LlamaCppWeb: native server is only available on iOS/Android/Desktop');
   }
 
   async stopNativeLlamaServer(): Promise<void> {}
@@ -693,7 +698,15 @@ export class LlamaCppWeb implements LlamaCppPlugin {
 }
 
 const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp', {
-  web: () => import('./web').then((m) => new m.LlamaCppWeb()),
+  web: () =>
+    import('./isomorphic/desktop.runtime').then(async ({ isDesktopRuntime }) => {
+      if (isDesktopRuntime()) {
+        const m = await import('./desktop');
+        return new m.LlamaCppDesktop();
+      }
+      const w = await import('./web');
+      return new w.LlamaCppWeb();
+    }),
 });
 
 export * from './definitions';

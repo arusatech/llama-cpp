@@ -2,7 +2,7 @@
 ## LlamaCpp Capacitor Plugin - Complete Architecture Guide
 
 **Generated:** July 2, 2026  
-**Status:** Complete - All 3 Platforms Documented  
+**Status:** Complete - All 4 Platforms Documented (iOS, Android, Web/PWA, Desktop)  
 **Total Documentation:** 15,000+ lines across 4 files
 
 ---
@@ -87,6 +87,33 @@
 **Quick Stats:**
 - WASM module: 30-50 MB (full feature set)
 - Web Worker dedicated thread
+
+---
+
+#### [**Desktop Low-Level Design** (DESKTOP_LLD.md)](DESKTOP_LLD.md)
+**Focus:** Windows, macOS, Linux via Electron + native sidecar + WASM fallback
+
+**Key Sections:**
+- Sidecar CMake variants (Metal, Vulkan, CUDA, ROCm)
+- GPU/NPU probing and backend auto-selection
+- cap-native-server HTTP integration
+- DesktopProvider isomorphic TypeScript layer
+- electron-builder packaging pattern
+
+**Best For:**
+- Desktop app developers
+- GPU acceleration on NVIDIA / AMD / Intel / Apple
+- Electron main-process integration
+- Understanding sidecar ↔ renderer IPC
+
+**Architecture reference:** [DESKTOP_ARCHITECTURE.md](DESKTOP_ARCHITECTURE.md)
+
+**Quick Stats:**
+- Sidecar binary: ~50-120 MB (variant-dependent)
+- HTTP API: OpenAI-compatible (`/v1/chat/completions`)
+- Fallback: existing WASM worker (PWA path)
+
+---
 - OPFS for persistent model storage
 - Cross-browser support (Chrome 90+, Firefox 78+, Safari 15+)
 

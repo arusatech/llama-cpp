@@ -1,4 +1,4 @@
-export type PlatformKind = 'native' | 'web';
+export type PlatformKind = 'native' | 'web' | 'desktop';
 
 export interface InitializeOptions {
   modelId: string;

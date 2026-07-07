@@ -970,10 +970,11 @@ int64_t llama_load_context_from_path(const char * path, const char * params_json
     }
 }
 
+#endif // CAPLLAMA_BUILD_WASM
+
 // ---------------------------------------------------------------------------
-// WASM-specific: streaming completion with per-token C callback (#2 / #3).
-// Holds g_mutex for the full inference (same as llama_completion) so another
-// thread cannot erase the context from g_contexts while streaming is active.
+// Streaming completion with per-token C callback (all native/desktop targets).
+// Holds g_mutex for the full inference so the context cannot be released mid-stream.
 // ---------------------------------------------------------------------------
 const char * llama_completion_stream(
     int64_t  context_id,
@@ -1089,8 +1090,6 @@ const char * llama_completion_stream(
         return tls_cstr("{\"error\":\"unknown\"}");
     }
 }
-
-#endif // CAPLLAMA_BUILD_WASM
 
 const char * llama_model_info(const char * model_path, const char * skip_json) {
     (void)skip_json;

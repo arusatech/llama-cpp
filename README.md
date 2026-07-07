@@ -25,28 +25,96 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 - **Session Management**: Save and load conversation states
 - **Benchmarking**: Performance testing and optimization tools
 - **Structured Output**: Generate JSON with schema validation
-- **Cross-Platform**: iOS, Android, and **Web/PWA** (WASM + OPFS) with native optimizations
+- **Cross-Platform**: iOS, Android, **Web/PWA**, and **Desktop** (Windows, macOS, Linux) with native optimizations
 
 ## 📱 Platform Support
 
-| Feature | iOS | Android | Web (PWA) |
-|---------|-----|---------|-----------|
-| Text Generation | ✅ | ✅ | ✅ |
-| Chat Conversations | ✅ | ✅ | ✅ |
-| Streaming | ✅ | ✅ | ✅ |
-| Multimodal | ✅ | ✅ | ✅¹ |
-| TTS | ✅ | ✅ | ✅¹ |
-| LoRA Adapters | ✅ | ✅ | ✅¹ |
-| Embeddings | ✅ | ✅ | ✅ |
-| Reranking | ✅ | ✅ | ✅² |
-| Session Management | ✅ | ✅ | ✅³ |
-| Benchmarking | ✅ | ✅ | ✅ |
+| Feature | iOS | Android | Web (PWA) | Desktop |
+|---------|-----|---------|-----------|---------|
+| Text Generation | ✅ | ✅ | ✅ | ✅ |
+| Chat Conversations | ✅ | ✅ | ✅ | ✅ |
+| Streaming | ✅ | ✅ | ✅ | ✅¹ |
+| Multimodal | ✅ | ✅ | ✅² | ✅ |
+| TTS | ✅ | ✅ | ✅² | ✅ |
+| LoRA Adapters | ✅ | ✅ | ✅² | ✅ |
+| Embeddings | ✅ | ✅ | ✅ | ✅ |
+| Reranking | ✅ | ✅ | ✅³ | ✅ |
+| Session Management | ✅ | ✅ | ✅⁴ | ✅ |
+| Benchmarking | ✅ | ✅ | ✅ | ✅ |
+| GPU Acceleration | Metal | CPU/Adreno | — | Vulkan/CUDA/ROCm/Metal |
 
-¹ **Web:** auxiliary GGUF files (mmproj, vocoder, LoRA) must be staged in the WASM VFS (e.g. via OPFS download → `/tmp/` path). GPU offload is not available in browser WASM.
+¹ **Desktop:** SSE streaming from the native sidecar (`/v1/chat/completions`, `/v1/completions` with `stream: true`).  
+² **Web:** auxiliary GGUF files must be staged in WASM VFS.  
+³ **Web:** requires rank-pooling embedding model.  
+⁴ **Web:** sessions persist in worker MEMFS for tab lifetime.
 
-² **Web:** requires a rank-pooling embedding model (same as native).
+### Build matrix
 
-³ **Web:** sessions persist in the worker MEMFS `/tmp/` for the lifetime of the WASM worker tab session.
+Quick reference for building plugin bundles and native artifacts. Run commands from the repo root.
+
+| Target | Host / toolchain | Output | Command |
+|--------|------------------|--------|---------|
+| **Plugin (TypeScript)** | Node.js (any OS) | `dist/` (ESM, CJS, types) | `npm run build` |
+| **iOS** | macOS + Xcode | `ios/Frameworks/llama-cpp.framework` | `npm run build:native` or `./build-native.sh` |
+| **iOS XCFramework** | macOS + Xcode | `ios/Frameworks/LlamaCpp.xcframework` | `npm run build:ios:xcframework` |
+| **Android** | macOS/Linux + Android NDK | `android/src/main/jniLibs/arm64-v8a/libllama-cpp-arm64.so` | `npm run build:native` |
+| **Web / PWA (WASM)** | Emscripten | `dist/wasm/llama_engine.wasm` + worker | `npm run build:pwa` |
+| **Web / PWA (pthread)** | Emscripten + COOP/COEP in app | same + pthread build | `npm run build:pwa:full` |
+| **Desktop sidecar** | CMake on host OS | `sidecar/bin/<binary>` | see table below |
+| **Desktop package staging** | WASM + sidecar | `extraResources/sidecar/` + WASM | `npm run build:desktop` |
+| **Publish tarball (JS + native + WASM)** | macOS recommended | `dist/` + `ios/` + `android/` + `dist/wasm/` | `npm run build:package` |
+
+**Desktop sidecar variants** (`SIDECAR_VARIANT` / npm script):
+
+| OS / arch | Variant | Accelerator | Command | Binary name (example) |
+|-----------|---------|-------------|---------|------------------------|
+| macOS arm64 | `metal-coreml` | Metal + CoreML ANE | `npm run build:sidecar:metal` | `sidecar/bin/darwin-arm64` |
+| macOS x64 | `metal` | Metal | `npm run build:sidecar` | `sidecar/bin/darwin-x64` |
+| Linux x64 | `vulkan-openblas` | Vulkan + CPU (OpenBLAS) | `npm run build:sidecar:linux` | `sidecar/bin/linux-x64` |
+| Windows x64 | `vulkan-openblas` | Vulkan + CPU | `npm run build:sidecar:win` | `sidecar/bin/win32-x64` |
+| Linux / Win / macOS | `cuda` | NVIDIA CUDA | `npm run build:sidecar:cuda` | `…-cuda` suffix |
+| Linux | `rocm` | AMD ROCm/HIP | `npm run build:sidecar:rocm` | `…-rocm` suffix |
+| Any | `cpu` / `openblas` | CPU only | `npm run build:sidecar:cpu` | `…-cpu` or `…-openblas` |
+
+`npm run build:sidecar` auto-picks the default variant for the current host (Metal on macOS, Vulkan on Linux, CPU elsewhere). Pass a variant explicitly: `./scripts/build-sidecar.sh <variant>`.
+
+**Optional env (desktop GPU plugins):**
+
+| Variable | Purpose |
+|----------|---------|
+| `LLAMA_CPP_UPSTREAM` | Path to upstream `llama.cpp` — also builds `libggml-*` GPU backend plugins bundled next to the sidecar |
+| `OPENBLAS_ROOT` | Custom OpenBLAS install for CPU-optimized Linux/Windows builds |
+
+**Verify / clean:**
+
+| Task | Command |
+|------|---------|
+| Unit tests | `npm run test:unit` |
+| Desktop bundle check | `npm run verify:desktop:bundle` |
+| Clean all artifacts | `npm run clean:all` |
+
+See also [docs/DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md) (accelerator matrix) and [cpp/README.md](cpp/README.md) (syncing upstream llama.cpp).
+
+### Desktop (Windows, macOS, Linux)
+
+- **Architecture:** Electron + native sidecar + WASM fallback ([docs/DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md))
+- **Accelerators:** NVIDIA CUDA, AMD ROCm/Radeon, Intel OpenVINO, Apple Metal/CoreML, Vulkan (cross-vendor GPU), CPU (OpenBLAS/Accelerate)
+- **Build sidecar:** `npm run build:sidecar` (macOS: `npm run build:sidecar:metal`; GPU: `build:sidecar:cuda` / `build:sidecar:rocm`)
+- **Stage for packaging:** `npm run build:desktop` → copies sidecar + WASM to `extraResources/`
+- **electron-builder:** merge config from the plugin:
+
+```javascript
+// electron-builder.config.js in your Electron app
+const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+module.exports = llama.merge({
+  appId: 'com.yourapp.id',
+  // ...your existing config
+});
+```
+
+- **Main process:** `registerLlamaDesktopIpc({ ipcMain, app })` from `llama-cpp-capacitor/desktop`
+- **Preload:** `require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer)`
+- **Capacitor API:** full `LlamaCppPlugin` surface via `LlamaCppDesktop` (auto-selected in Electron)
 
 ### PWA requirements
 

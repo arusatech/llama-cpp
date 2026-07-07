@@ -7,8 +7,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +23,9 @@ extern "C" {
 int64_t llama_init_context(const char * model_path, const char * params_json);
 void llama_release_context(int64_t context_id);
 const char * llama_completion(int64_t context_id, const char * params_json);
+const char * llama_completion_stream(int64_t context_id, const char * params_json,
+                                     void (*token_callback)(const char * token_text, void * user_data, int token_index),
+                                     void * user_data);
 const char * llama_get_formatted_chat(int64_t context_id, const char * messages_json, const char * chat_template,
                                       const char * params_json);
 const char * llama_get_context_model_json(int64_t context_id);
@@ -308,6 +313,175 @@ bool run_prompt_completion(int64_t ctx_id, const std::string & prompt, int max_t
     return true;
 }
 
+enum class SseStreamKind { Chat, Completion };
+
+struct LiveSseState {
+    std::mutex                    mu;
+    std::condition_variable       cv;
+    std::deque<std::string>       pending;
+    bool                          producer_done = false;
+};
+
+struct LiveSseTokenCtx {
+    std::shared_ptr<LiveSseState> state;
+    std::string                   id;
+    std::string                   model_name;
+    int64_t                       created = 0;
+    SseStreamKind                 kind    = SseStreamKind::Chat;
+    bool                          sent_role = false;
+};
+
+void sse_enqueue(const std::shared_ptr<LiveSseState> & state, const std::string & line) {
+    {
+        std::lock_guard<std::mutex> lock(state->mu);
+        state->pending.push_back(line);
+    }
+    state->cv.notify_one();
+}
+
+void sse_token_callback(const char * token_text, void * user_data, int /*token_index*/) {
+    if (!user_data || !token_text) {
+        return;
+    }
+    auto * ctx = static_cast<LiveSseTokenCtx *>(user_data);
+    if (!ctx->state || token_text[0] == '\0') {
+        return;
+    }
+
+    std::string line;
+    if (ctx->kind == SseStreamKind::Chat) {
+        if (!ctx->sent_role) {
+            ctx->sent_role = true;
+            json first = {{"id", ctx->id},
+                          {"object", "chat.completion.chunk"},
+                          {"created", ctx->created},
+                          {"model", ctx->model_name},
+                          {"choices", json::array({json{{"index", 0},
+                                                        {"delta", json{{"role", "assistant"}}},
+                                                        {"finish_reason", nullptr}}})}};
+            sse_enqueue(ctx->state, std::string("data: ") + first.dump() + "\n\n");
+        }
+        json chunk = {{"id", ctx->id},
+                      {"object", "chat.completion.chunk"},
+                      {"created", ctx->created},
+                      {"model", ctx->model_name},
+                      {"choices", json::array({json{{"index", 0},
+                                                    {"delta", json{{"content", token_text}}},
+                                                    {"finish_reason", nullptr}}})}};
+        line = std::string("data: ") + chunk.dump() + "\n\n";
+    } else {
+        json chunk = {{"id", ctx->id},
+                      {"object", "text_completion"},
+                      {"created", ctx->created},
+                      {"model", ctx->model_name},
+                      {"choices", json::array({json{{"index", 0},
+                                                    {"text", token_text},
+                                                    {"finish_reason", nullptr}}})}};
+        line = std::string("data: ") + chunk.dump() + "\n\n";
+    }
+    sse_enqueue(ctx->state, line);
+}
+
+void sse_finish_stream(const std::shared_ptr<LiveSseState> & state, const LiveSseTokenCtx & ctx) {
+    std::string line;
+    if (ctx.kind == SseStreamKind::Chat) {
+        json final_chunk = {{"id", ctx.id},
+                            {"object", "chat.completion.chunk"},
+                            {"created", ctx.created},
+                            {"model", ctx.model_name},
+                            {"choices", json::array({json{{"index", 0},
+                                                          {"delta", json::object()},
+                                                          {"finish_reason", "stop"}}})}};
+        line = std::string("data: ") + final_chunk.dump() + "\n\n";
+    } else {
+        json final_chunk = {{"id", ctx.id},
+                            {"object", "text_completion"},
+                            {"created", ctx.created},
+                            {"model", ctx.model_name},
+                            {"choices", json::array({json{{"index", 0},
+                                                          {"text", ""},
+                                                          {"finish_reason", "stop"}}})}};
+        line = std::string("data: ") + final_chunk.dump() + "\n\n";
+    }
+    sse_enqueue(state, line);
+    sse_enqueue(state, "data: [DONE]\n\n");
+    {
+        std::lock_guard<std::mutex> lock(state->mu);
+        state->producer_done = true;
+    }
+    state->cv.notify_one();
+}
+
+void attach_live_sse_provider(httplib::Response & res, const std::shared_ptr<LiveSseState> & state) {
+    res.set_header("Cache-Control", "no-cache");
+    res.set_header("Connection", "keep-alive");
+    res.set_chunked_content_provider(
+        "text/event-stream",
+        [state](size_t /*offset*/, httplib::DataSink & sink) {
+            for (;;) {
+                std::deque<std::string> batch;
+                bool done = false;
+                {
+                    std::unique_lock<std::mutex> lock(state->mu);
+                    if (state->pending.empty() && !state->producer_done) {
+                        state->cv.wait_for(lock, std::chrono::milliseconds(100));
+                    }
+                    batch.swap(state->pending);
+                    done = state->producer_done;
+                }
+                for (const auto & line : batch) {
+                    if (!sink.write(line.data(), line.size())) {
+                        return false;
+                    }
+                }
+                if (done && batch.empty()) {
+                    std::unique_lock<std::mutex> lock(state->mu);
+                    if (state->pending.empty()) {
+                        sink.done();
+                        return false;
+                    }
+                } else if (!batch.empty()) {
+                    continue;
+                }
+                if (done) {
+                    sink.done();
+                    return false;
+                }
+                return true;
+            }
+        });
+}
+
+void start_live_completion_stream(int64_t ctx_id, const std::string & prompt, int max_tokens, double temperature,
+                                  const std::string & id, const std::string & model_name, int64_t created,
+                                  SseStreamKind kind, httplib::Response & res) {
+    json comp = json::object();
+    comp["prompt"]       = prompt;
+    comp["n_predict"]    = max_tokens;
+    comp["temperature"]  = temperature;
+    const std::string comp_json = comp.dump();
+
+    auto state = std::make_shared<LiveSseState>();
+    attach_live_sse_provider(res, state);
+
+    std::thread([state, ctx_id, comp_json, id, model_name, created, kind]() {
+        LiveSseTokenCtx token_ctx{state, id, model_name, created, kind, false};
+        const char *    result = llama_completion_stream(ctx_id, comp_json.c_str(), sse_token_callback, &token_ctx);
+        if (result) {
+            try {
+                json r = json::parse(result);
+                if (r.contains("error")) {
+                    json err_chunk = {{"error", r["error"]}};
+                    sse_enqueue(state, std::string("data: ") + err_chunk.dump() + "\n\n");
+                }
+            } catch (...) {
+                /* ignore parse errors on trailing result */
+            }
+        }
+        sse_finish_stream(state, token_ctx);
+    }).detach();
+}
+
 void register_routes(httplib::Server & svr, int64_t ctx_id) {
     svr.set_default_headers({{"Server", "llama-cpp-capacitor-native"},
                              {"Access-Control-Allow-Origin", "*"},
@@ -375,80 +549,44 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
             res.set_content(make_openai_error("no prompt in formatted chat").dump(), "application/json");
             return;
         }
-        json cr;
-        std::string text;
-        int prompt_tokens = 0;
-        int completion_tokens = 0;
-        json err;
-        if (!run_prompt_completion(ctx_id, fc["prompt"].get<std::string>(), max_tokens, temperature, cr, text, prompt_tokens,
-                                   completion_tokens, err)) {
-            res.status = err.contains("error") && err["error"].is_object() ? 500 : 400;
-            res.set_content(err.dump(), "application/json");
-            return;
-        }
 
         const int64_t created =
             static_cast<int64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
         const std::string id = std::string("chatcmpl-cap-") + std::to_string(created);
         const std::string model_name = model.empty() ? "local" : model;
+        const std::string prompt = fc["prompt"].get<std::string>();
 
-        if (!stream) {
-            json choice = json::object(
-                {{"index", 0},
-                 {"message", json::object({{"role", "assistant"}, {"content", text}})},
-                 {"finish_reason", "stop"}});
-            json out = {{"id", id},
-                        {"object", "chat.completion"},
-                        {"created", created},
-                        {"model", model_name},
-                        {"choices", json::array({choice})},
-                        {"usage", json{{"prompt_tokens", prompt_tokens},
-                                       {"completion_tokens", completion_tokens},
-                                       {"total_tokens", prompt_tokens + completion_tokens}}}};
-            res.set_content(out.dump(), "application/json");
+        if (stream) {
+            start_live_completion_stream(ctx_id, prompt, max_tokens, temperature, id, model_name, created,
+                                         SseStreamKind::Chat, res);
             return;
         }
 
-        std::vector<std::string> chunks = token_level_chunks_for_stream(ctx_id, text);
-        res.set_header("Cache-Control", "no-cache");
-        res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider(
-            "text/event-stream", [chunks = std::move(chunks), id, model_name, created](size_t, httplib::DataSink & sink) {
-                json first = {{"id", id},
-                              {"object", "chat.completion.chunk"},
-                              {"created", created},
-                              {"model", model_name},
-                              {"choices", json::array({json{{"index", 0},
-                                                            {"delta", json{{"role", "assistant"}}},
-                                                            {"finish_reason", nullptr}}})}};
-                const std::string first_line = std::string("data: ") + first.dump() + "\n\n";
-                sink.write(first_line.c_str(), first_line.size());
+        json cr;
+        std::string text;
+        int prompt_tokens = 0;
+        int completion_tokens = 0;
+        json err;
+        if (!run_prompt_completion(ctx_id, prompt, max_tokens, temperature, cr, text, prompt_tokens, completion_tokens,
+                                   err)) {
+            res.status = err.contains("error") && err["error"].is_object() ? 500 : 400;
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
 
-                for (const auto & ch : chunks) {
-                    json chunk = {{"id", id},
-                                  {"object", "chat.completion.chunk"},
-                                  {"created", created},
-                                  {"model", model_name},
-                                  {"choices", json::array({json{{"index", 0},
-                                                                {"delta", json{{"content", ch}}},
-                                                                {"finish_reason", nullptr}}})}};
-                    const std::string line = std::string("data: ") + chunk.dump() + "\n\n";
-                    sink.write(line.c_str(), line.size());
-                }
-
-                json final_chunk = {{"id", id},
-                                    {"object", "chat.completion.chunk"},
-                                    {"created", created},
-                                    {"model", model_name},
-                                    {"choices", json::array({json{{"index", 0},
-                                                                  {"delta", json::object()},
-                                                                  {"finish_reason", "stop"}}})}};
-                const std::string final_line = std::string("data: ") + final_chunk.dump() + "\n\n";
-                sink.write(final_line.c_str(), final_line.size());
-                sink.write("data: [DONE]\n\n", 14);
-                sink.done();
-                return true;
-            });
+        json choice = json::object(
+            {{"index", 0},
+             {"message", json::object({{"role", "assistant"}, {"content", text}})},
+             {"finish_reason", "stop"}});
+        json out = {{"id", id},
+                    {"object", "chat.completion"},
+                    {"created", created},
+                    {"model", model_name},
+                    {"choices", json::array({choice})},
+                    {"usage", json{{"prompt_tokens", prompt_tokens},
+                                   {"completion_tokens", completion_tokens},
+                                   {"total_tokens", prompt_tokens + completion_tokens}}}};
+        res.set_content(out.dump(), "application/json");
     };
 
     svr.Post("/v1/chat/completions", chat_handler);
@@ -467,59 +605,32 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
             res.set_content(make_openai_error("invalid JSON or missing prompt").dump(), "application/json");
             return;
         }
-        json cr;
-        std::string text;
-        int prompt_tokens = 0;
-        int completion_tokens = 0;
-        json err;
-        if (!run_prompt_completion(ctx_id, prompt, max_tokens, temperature, cr, text, prompt_tokens, completion_tokens, err)) {
-            res.status = err.contains("error") && err["error"].is_object() ? 500 : 400;
-            res.set_content(err.dump(), "application/json");
-            return;
-        }
 
         const int64_t created =
             static_cast<int64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
         const std::string id = std::string("cmpl-cap-") + std::to_string(created);
         const std::string model_name = model.empty() ? "local" : model;
-        json payload = openai_completion_response(model_name, text, prompt_tokens, completion_tokens, created);
 
-        if (!stream) {
-            res.set_content(payload.dump(), "application/json");
+        if (stream) {
+            start_live_completion_stream(ctx_id, prompt, max_tokens, temperature, id, model_name, created,
+                                         SseStreamKind::Completion, res);
             return;
         }
 
-        std::vector<std::string> chunks = token_level_chunks_for_stream(ctx_id, text);
-        res.set_header("Cache-Control", "no-cache");
-        res.set_header("Connection", "keep-alive");
-        res.set_chunked_content_provider(
-            "text/event-stream",
-            [chunks = std::move(chunks), id, model_name, created](size_t, httplib::DataSink & sink) {
-                for (const auto & ch : chunks) {
-                    json chunk = {{"id", id},
-                                  {"object", "text_completion"},
-                                  {"created", created},
-                                  {"model", model_name},
-                                  {"choices", json::array({json{{"index", 0},
-                                                                {"text", ch},
-                                                                {"finish_reason", nullptr}}})}};
-                    const std::string line = std::string("data: ") + chunk.dump() + "\n\n";
-                    sink.write(line.c_str(), line.size());
-                }
+        json cr;
+        std::string text;
+        int prompt_tokens = 0;
+        int completion_tokens = 0;
+        json err;
+        if (!run_prompt_completion(ctx_id, prompt, max_tokens, temperature, cr, text, prompt_tokens, completion_tokens,
+                                   err)) {
+            res.status = err.contains("error") && err["error"].is_object() ? 500 : 400;
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
 
-                json final_chunk = {{"id", id},
-                                    {"object", "text_completion"},
-                                    {"created", created},
-                                    {"model", model_name},
-                                    {"choices", json::array({json{{"index", 0},
-                                                                  {"text", ""},
-                                                                  {"finish_reason", "stop"}}})}};
-                const std::string final_line = std::string("data: ") + final_chunk.dump() + "\n\n";
-                sink.write(final_line.c_str(), final_line.size());
-                sink.write("data: [DONE]\n\n", 14);
-                sink.done();
-                return true;
-            });
+        json payload = openai_completion_response(model_name, text, prompt_tokens, completion_tokens, created);
+        res.set_content(payload.dump(), "application/json");
     };
 
     svr.Post("/v1/completions", completion_handler);
@@ -752,6 +863,12 @@ int cap_llama_server_main(int argc, char ** argv) {
             port = std::atoi(argv[++i]);
         } else if ((a == "-c" || a == "--ctx-size" || a == "-n") && i + 1 < argc) {
             pj["n_ctx"] = std::atoi(argv[++i]);
+        } else if ((a == "-ngl" || a == "--n-gpu-layers") && i + 1 < argc) {
+            pj["n_gpu_layers"] = std::atoi(argv[++i]);
+        } else if ((a == "-t" || a == "--threads") && i + 1 < argc) {
+            pj["n_threads"] = std::atoi(argv[++i]);
+        } else if (a == "--no-gpu") {
+            pj["n_gpu_layers"] = 0;
         }
     }
     if (!model) {

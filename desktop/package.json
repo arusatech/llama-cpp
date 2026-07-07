@@ -1,0 +1,11 @@
+{
+  "name": "llama-cpp-capacitor-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Desktop runtime modules for llama-cpp-capacitor (Electron main process)",
+  "main": "src/main/index.cjs",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  }
+}
