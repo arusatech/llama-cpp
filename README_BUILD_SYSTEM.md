@@ -1,42 +1,42 @@
-# Build System Reference - llama-cpp-capacitor 0.2.0
+# Build System Reference — llama-cpp-capacitor 0.2.1
 
-Complete consolidated guide covering build variants, package configuration, and release procedures.
+Complete consolidated guide covering build variants, package configuration, and release procedures for all platforms: iOS, Android, Web/PWA, and Desktop (Electron).
 
 ---
 
 ## 📖 Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Build Variants](#build-variants)
-3. [Package Configuration](#package-configuration)
-4. [Release Process](#release-process)
-5. [Pre-Release Checklist](#pre-release-checklist)
-6. [Environment Variables](#environment-variables)
-7. [Common Issues](#common-issues)
-8. [FAQ](#faq)
+2. [Platform Overview](#platform-overview)
+3. [Prerequisites](#prerequisites)
+4. [Build Variants](#build-variants)
+5. [Platform-Specific Build Instructions](#platform-specific-build-instructions)
+6. [Package Configuration](#package-configuration)
+7. [Release Process](#release-process)
+8. [Pre-Release Checklist](#pre-release-checklist)
+9. [Environment Variables](#environment-variables)
+10. [Common Issues](#common-issues)
+11. [FAQ](#faq)
 
 ---
 
 ## Quick Start
 
-### The Simplest Release (One Command)
+### One-Command Production Release
 
 ```bash
 npm publish
 ```
 
-**This automatically:**
-1. Runs prepack hook → `npm run build:package`
-2. Builds TypeScript → `npm run build`
-3. Builds iOS + Android → `npm run build:native`
-4. Builds WASM + PWA → `npm run build:pwa`
-5. Verifies all artifacts
-6. Packages everything
-7. Publishes to npm
+This automatically runs the `prepublishOnly` hook → `npm run build:package`:
+1. TypeScript compilation → `dist/`
+2. iOS native framework → `ios/Frameworks/llama-cpp.framework/`
+3. Android JNI library → `android/src/main/jniLibs/arm64-v8a/`
+4. Web/PWA WASM worker → `dist/wasm/` + `dist/workers/`
+5. Artifact verification
+6. npm packaging and publish
 
-**Result:** Users get iOS + Android + PWA + WASM (~35-40 MB) ✅
-
-**Note:** When using `npm publish` directly, it runs the prepack hook which includes `npm run build`. However, when using `build-variants.sh` directly, do NOT run `npm run build` afterward as it deletes WASM artifacts.
+**Result:** Users receive iOS + Android + Web/PWA + Desktop in one `~35-40 MB` package ✅
 
 ### Manual Build Steps
 
@@ -44,210 +44,402 @@ npm publish
 # 1. Clean all previous builds
 npm run clean:all
 
-# 2. Build minimal variant (includes iOS + Android + PWA/WASM + TypeScript - complete!)
+# 2. Build minimal variant (iOS + Android + WASM + TypeScript)
 ./build-variants.sh --variant minimal
 
-# 3. Verify all artifacts exist
+# 3. Verify all artifacts
 npm run verify:pack:artifacts
 
-# 4. Publish to npm
+# 4. Create and inspect the tarball
+npm pack --ignore-scripts
+
+# 5. Publish
 npm publish
 ```
 
-**What each step does:**
-- `verify:pack:artifacts`: Checks iOS, Android, and PWA/WASM files exist
-- `npm publish`: Automatically runs prepack hook to verify everything, packages, and publishes to npm registry
+> **⚠️ Important:** `build-variants.sh` handles TypeScript compilation. Do NOT run `npm run build` separately afterward — it invokes `npm run clean` first and deletes WASM artifacts.
 
-**Note:** `build-variants.sh` handles EVERYTHING including TypeScript compilation. Do NOT run `npm run build` separately as it will delete WASM artifacts.
+---
 
-**Alternative (if you want to see package contents before publishing):**
+## Platform Overview
+
+| Platform | Runtime | Build output | GPU |
+|----------|---------|--------------|-----|
+| **iOS** | Native Metal + CPU | `ios/Frameworks/llama-cpp.framework/` | ✅ Metal |
+| **Android** | JNI + CPU/Vulkan | `android/src/main/jniLibs/arm64-v8a/libllama-cpp-arm64.so` | ✅ Vulkan |
+| **Web / PWA** | WebAssembly (Emscripten) | `dist/wasm/` + `dist/workers/` | ❌ CPU only |
+| **Desktop** | Electron + native sidecar | `sidecar/bin/<os>-<arch>` + WASM fallback | ✅ CUDA/ROCm/Metal/Vulkan |
+
+All four platforms share the same TypeScript API surface (`src/definitions.ts`). Every method is implemented on every platform — see the [Feature Coverage Matrix](README.md#-full-api-feature-coverage-matrix) for the full breakdown.
+
+---
+
+## Prerequisites
+
+### All Platforms
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Node.js | ≥ 18 | https://nodejs.org |
+| npm | ≥ 9 | bundled with Node.js |
+| CMake | ≥ 3.16 | `brew install cmake` / `apt install cmake` |
+
+### iOS (macOS only)
+
+| Tool | Version | Install |
+|------|---------|---------|
+| macOS | ≥ 13 Ventura | — |
+| Xcode | ≥ 15 | App Store |
+| Xcode CLI tools | — | `xcode-select --install` |
+
 ```bash
-npm pack --ignore-scripts    # Creates package file, shows npm notice with size/contents
-npm publish                   # Publishes to npm
+# Verify
+xcode-select -p
+cmake --version
 ```
 
-**Clean Scripts Available:**
-- `npm run clean` - Clean TypeScript dist
-- `npm run clean:native` - Clean iOS/Android builds
-- `npm run clean:wasm` - Clean WASM artifacts (Rust, pkg, dist/wasm)
-- `npm run clean:all` - Clean everything
+### Android
 
-### For Development Only
+| Tool | Version | Install |
+|------|---------|---------|
+| Android Studio | ≥ Flamingo | https://developer.android.com/studio |
+| Android NDK | r26+ | Android Studio → SDK Manager → NDK |
+| Java (JDK) | 17 | `brew install openjdk@17` |
 
 ```bash
-# Full debug build (all architectures, debug symbols, complete build)
-./build-variants.sh --variant development
+# Required environment variables
+export ANDROID_HOME=$HOME/Library/Android/sdk        # macOS
+export ANDROID_HOME=$HOME/Android/Sdk               # Linux
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$(ls $ANDROID_HOME/ndk | tail -1)
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+
+# Verify
+adb version
+$ANDROID_NDK_HOME/ndk-build --version
 ```
+
+### Web / PWA (WASM)
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Emscripten | ≥ 3.1.50 | `brew install emscripten` or see [emsdk](https://emscripten.org/docs/getting_started/downloads.html) |
+| Rust | ≥ 1.75 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| wasm-bindgen-cli | matches Cargo.toml | `cargo install wasm-bindgen-cli` |
+
+```bash
+# Add wasm target
+rustup target add wasm32-unknown-emscripten
+
+# Verify
+emcc --version
+rustc --version
+wasm-bindgen --version
+cargo install wasm-pack   # optional, for standalone WASM builds
+```
+
+### Desktop (Electron sidecar)
+
+| Tool | Needed for | Install |
+|------|-----------|---------|
+| CMake ≥ 3.20 | All sidecar builds | see above |
+| NVIDIA CUDA Toolkit | `--cuda` variant | https://developer.nvidia.com/cuda-downloads |
+| AMD ROCm | `--rocm` variant | https://rocm.docs.amd.com |
+| Vulkan SDK | Vulkan backend | https://vulkan.lunarg.com/sdk/home |
+| OpenBLAS | CPU-optimized Linux/Win | `apt install libopenblas-dev` |
 
 ---
 
 ## Build Variants
 
-### 6 Optimized Variants
+### Variant Comparison
 
-| Variant | Size | iOS | Android | Sources | Debug | PWA/WASM | Best For |
-|---------|------|-----|---------|---------|-------|----------|----------|
-| **minimal** ⭐ | ~20-23 MB | arm64 stripped | arm64 stripped | ❌ | ❌ | ✅ Included* | Public npm (default) |
-| **core** | ~33-40 MB | arm64 stripped | arm64 stripped | ✅ | ❌ | ✅ Included* | Production + rebuild |
-| **development** | ~55-70 MB | arm64+x86_64 | arm64+x86_64 | ✅ | ✅ | ✅ Included* | Local dev/testing |
-| **ios-only** | ~8-10 MB | arm64 stripped | ❌ | ✅ | ❌ | ❌ Not included | iOS only |
-| **android-only** | ~25-30 MB | ❌ | arm64 stripped | ✅ | ❌ | ❌ Not included | Android only |
-| **full** | ~75+ MB | All | All | ✅ | ✅ | ✅ Included* | ❌ Not recommended |
+| Variant | Size | iOS | Android | Web/WASM | Sources | Debug | Use |
+|---------|------|-----|---------|---------|---------|-------|-----|
+| **minimal** ⭐ | ~23-25 MB | arm64 stripped | arm64 stripped | ✅ | ❌ | ❌ | **Public npm** |
+| **core** | ~33-40 MB | arm64 stripped | arm64 stripped | ✅ | ✅ | ❌ | Production + rebuild |
+| **development** | ~55-70 MB | arm64+x86_64 | arm64+x86_64 | ✅ | ✅ | ✅ | Local dev/testing |
+| **ios-only** | ~8-10 MB | arm64 stripped | ❌ | ❌ | ✅ | ❌ | iOS-only apps |
+| **android-only** | ~25-30 MB | ❌ | arm64 stripped | ❌ | ✅ | ❌ | Android-only apps |
+| **full** | ~75+ MB | All | All | ✅ | ✅ | ✅ | ❌ Not recommended |
 
-**PWA/WASM Status:**
-- ✅ **minimal, core, development, full**: Attempt to build PWA/WASM automatically (optional, may fail gracefully)
-- ❌ **ios-only, android-only**: PWA/WASM not included (platform-specific builds)
-
-*Size estimates include optional PWA/WASM if build succeeds. Without PWA, subtract 2-3 MB.
-
-### Build Any Variant
+### Build any variant
 
 ```bash
 ./build-variants.sh --variant [minimal|core|development|ios-only|android-only|full]
 ```
 
-**All variants except ios-only and android-only automatically attempt PWA/WASM building.**
+### Minimal Variant (Recommended for npm)
 
-### Minimal Variant (Recommended)
-
-**When to use:** Public npm release, app stores, production deployments
-
-**What it builds:**
-- ✅ iOS arm64 (stripped)
-- ✅ Android arm64 (stripped)
-- ✅ PWA/WASM assets (automatic, optional)
-- ❌ NO C++ sources
-
-**Contents:**
-- iOS framework: arm64 only, debug symbols stripped (~3-4 MB)
-- Android .so: arm64-v8a only, stripped (~15-16 MB)
-- JavaScript/TypeScript dist (~1-2 MB)
-- PWA/WASM assets (~2-3 MB if successful)
-- **NO** C++ sources
-- **NO** debug symbols
+```bash
+./build-variants.sh --variant minimal
+```
 
 **Size breakdown:**
 ```
-iOS arm64 (stripped):      3-4 MB
-Android arm64 (stripped):  15-16 MB
-WASM + PWA assets:         2-3 MB (automatic)
-JS/TS dist:               1-2 MB
-────────────────────
-Total:                     ~23-25 MB
+iOS arm64 (stripped):         3–4 MB
+Android arm64 (stripped):    15–16 MB
+WASM + PWA worker:            2–3 MB
+TypeScript dist:              1–2 MB
+─────────────────────────────────────
+Total:                      ~23–25 MB
 ```
 
-**Build:**
-```bash
-./build-variants.sh --variant minimal
-# PWA/WASM is automatically attempted (may fail - that's OK)
-```
+---
 
-### Core Variant (Balanced)
+## Platform-Specific Build Instructions
 
-**When to use:** Production with flexibility for users who need to rebuild
+### iOS
 
-**What it builds:**
-- ✅ iOS arm64 (stripped)
-- ✅ Android arm64 (stripped)
-- ✅ PWA/WASM assets (automatic, optional)
-- ✅ C++ sources included
+The iOS build produces a universal `llama-cpp.framework` containing the C++ inference engine and exposes C symbols via `cap-ios-bridge.h`.
 
-**Contents:**
-- iOS framework: arm64 only, stripped (~3-4 MB)
-- Android .so: arm64-v8a only, stripped (~15-16 MB)
-- **WITH** C++ sources (~13 MB)
-- JavaScript/TypeScript dist (~1-2 MB)
-- PWA/WASM assets (~2-3 MB if successful)
-
-**Benefits:**
-- Users can rebuild with custom options
-- Complete web support with WASM
-- Good balance: comprehensive but not huge
-
-**Size:** ~33-40 MB (including automatic PWA/WASM attempt)
-
-**Build:**
-```bash
-./build-variants.sh --variant core
-# PWA/WASM is automatically attempted (may fail - that's OK)
-```
-
-### Development Variant
-
-**When to use:** Local development, CI/CD testing, debugging
-
-**What it builds:**
-- ✅ iOS arm64+x86_64 (WITH debug symbols)
-- ✅ Android arm64+x86_64 (WITH debug symbols)
-- ✅ PWA/WASM assets (automatic, optional)
-- ✅ C++ sources included
-
-**Contents:**
-- iOS: arm64 + x86_64, **with** debug symbols
-- Android: arm64-v8a + x86_64, **with** debug symbols
-- C++ sources
-- PWA/WASM assets (~2-3 MB if successful)
-- All debug information
-
-**Important:** NOT for public release
-
-**Size:** ~55-70 MB (including automatic PWA/WASM attempt)
+#### Build framework
 
 ```bash
-./build-variants.sh --variant development
-# PWA/WASM is automatically attempted (may fail - that's OK)
+# Device (arm64) — ships in the npm package
+cd ios
+cmake -B build-device -S . \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0
+cmake --build build-device --config Release -j$(sysctl -n hw.ncpu)
+
+# Simulator (arm64 + x86_64) — needed for Xcode Simulator
+bash scripts/ensure-llama-ios-xcframework.sh
 ```
 
-### Platform-Specific Variants
+#### What gets built
+
+| Symbol | Purpose |
+|--------|---------|
+| `llama_init_context` | Load GGUF model, returns context ID |
+| `llama_run_completion` | Run inference, returns JSON result |
+| `llama_run_embedding_json` | Generate embeddings |
+| `llama_rerank_json` | Rerank documents |
+| `llama_bench` | Benchmark pp/tg performance |
+| `llama_load/save_session_file` | KV-cache session persistence |
+| `llama_apply/remove_lora_adapters` | LoRA adapter management |
+| `llama_init/release_multimodal` | Vision/audio multimodal |
+| `llama_init/release_vocoder` | TTS vocoder |
+| `llama_get/decode_audio_tokens` | TTS token synthesis |
+| `llama_get_context_gpu_info` | Metal GPU usage reporting |
+| `cap_llama_server_start/stop` | In-process HTTP server |
+
+All symbols are declared in `cpp/cap-ios-bridge.h` and implemented in `cpp/cap-ios-bridge.cpp`.
+
+#### Swift integration
+
+```swift
+// LlamaNativeBridge.swift — dlsym-based dynamic loading
+let fn = try LlamaNativeBridge.sym("llama_run_completion", RunCompletionFn.self)
+```
+
+The Swift layer in `ios/Sources/LlamaCppCapacitor/LlamaCpp.swift` wraps every symbol with error handling and background `DispatchQueue` dispatch.
+
+#### GPU support
+
+Metal is used automatically when `n_gpu_layers > 0` is passed to `initContext`. The `llama_get_context_gpu_info` symbol returns `{"gpu": true/false, "reasonNoGPU": "..."}`.
+
+---
+
+### Android
+
+The Android build produces a JNI shared library loaded by `LlamaCpp.java` via `System.loadLibrary()`.
+
+#### Build library
 
 ```bash
-# iOS only (8-10 MB)
-./build-variants.sh --variant ios-only
+cd android
+./gradlew assembleRelease
 
-# Android only (25-30 MB)
-./build-variants.sh --variant android-only
+# Or via CMake directly
+cmake -B build-android -S src/main \
+  -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-26 \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-android --config Release -j$(nproc)
 ```
+
+#### JNI file map
+
+| JNI file | Methods |
+|----------|---------|
+| `jni.cpp` | `initContextNative`, `completionNative`, `tokenizeNative`, `embeddingNative`, `rerankNative`, `benchNative`, `loadSessionNative`, `saveSessionNative` |
+| `jni-lora.cpp` | `applyLoraAdaptersNative`, `removeLoraAdaptersNative`, `getLoadedLoraAdaptersNative` |
+| `jni-multimodal.cpp` | `initMultimodalNative`, `isMultimodalEnabledNative`, `getMultimodalSupportNative`, `releaseMultimodalNative` |
+| `jni-tts.cpp` | `initVocoderNative`, `isVocoderEnabledNative`, `getFormattedAudioCompletionNative`, `getAudioCompletionGuideTokensNative`, `decodeAudioTokensNative`, `releaseVocoderNative` |
+| `jni-chat-session.cpp` | (chat helper utilities, integrated into `jni.cpp` at link time) |
+
+#### Completion param propagation
+
+All 20+ sampling parameters from `NativeCompletionParams` are extracted in `completionNative` and mapped to `common_params::sampling`:
+
+```
+temperature, top_p, top_k, min_p, typical_p
+penalty_repeat, penalty_freq, penalty_present, penalty_last_n
+mirostat, mirostat_tau, mirostat_eta
+dry_multiplier, dry_base, dry_allowed_length, dry_penalty_last_n
+grammar, stop[], seed, n_probs, top_n_sigma, guide_tokens
+```
+
+#### GPU support
+
+Vulkan layers are enabled when `n_gpu_layers > 0`. The context result reflects actual GPU availability. `n_gpu_layers=0` → CPU-only with explicit `reasonNoGPU` message.
+
+---
+
+### Web / PWA (WebAssembly)
+
+The Web build compiles the C++ inference engine to WebAssembly via Emscripten + Rust FFI, running inside a dedicated Web Worker.
+
+#### Build commands
+
+```bash
+# Standard WASM (single-threaded, JSPI async)
+npm run build:wasm
+
+# WASM with pthread (multi-threaded — requires COOP/COEP headers)
+npm run build:wasm:pthreads
+
+# Full WASM (JSPI + largest context support)
+npm run build:wasm:full
+
+# Build Web Worker bundle
+npm run build:worker
+
+# Copy WASM assets to dist/
+npm run build:wasm:assets
+
+# All three steps together
+npm run build:pwa
+```
+
+#### Build output
+
+```
+dist/wasm/
+├── llama_engine.js                   ← wasm-bindgen JS glue
+├── llama_engine.wasm                 ← SIDE_MODULE (Rust FFI)
+├── llama_engine_emscripten.mjs       ← ESM module (MAIN_MODULE with C++)
+├── llama_engine_emscripten.wasm      ← WASM MAIN_MODULE binary
+└── package.json
+
+dist/workers/
+└── llm.worker.js                     ← Web Worker bundle
+```
+
+#### Environment flags
+
+```bash
+LLAMA_WASM_JSPI=1    # Enable async/await JSPI (default: 1)
+LLAMA_WASM_PTHREAD=0 # Disable pthreads (default: 0 — no SharedArrayBuffer needed)
+LLAMA_WASM_PTHREAD=1 # Enable pthreads (requires COOP/COEP response headers)
+```
+
+#### Chat template support
+
+On Web, `getFormattedChat` delegates to `provider.getFormattedChat` when available (WASM Jinja path). If not exposed by the WASM build, it falls back to four built-in client-side formatters: `chatml`, `llama3`, `mistral`, `gemma`.
+
+#### OPFS model storage
+
+Models are stored in the browser's Origin Private File System. Use `downloadModel` or `ensureModelInOpfs` to cache GGUF files:
+
+```typescript
+import { LlamaCpp } from 'llama-cpp-capacitor';
+await LlamaCpp.downloadModel({ url: 'https://…/model.gguf', filename: 'model.gguf' });
+```
+
+#### PWA server headers (COOP/COEP)
+
+Required only for the pthread build:
+
+```http
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Single-threaded WASM (default) does **not** require these headers.
+
+---
+
+### Desktop (Electron + native sidecar)
+
+The Desktop build wraps a native llama.cpp sidecar process behind an IPC bridge, with WASM as a fallback.
+
+#### Build sidecar
+
+```bash
+# macOS (Metal + CoreML ANE) — recommended for macOS
+npm run build:sidecar:metal
+
+# macOS or Linux (CPU with OpenBLAS)
+npm run build:sidecar:cpu
+
+# Linux / Windows (Vulkan + CPU)
+npm run build:sidecar
+
+# NVIDIA CUDA
+npm run build:sidecar:cuda
+
+# AMD ROCm
+npm run build:sidecar:rocm
+
+# Auto-detect host (Metal on macOS, Vulkan on Linux, CPU elsewhere)
+./scripts/build-sidecar.sh
+```
+
+#### Stage for Electron packaging
+
+```bash
+# Copies sidecar binary + WASM to extraResources/
+npm run build:desktop
+```
+
+#### Electron integration
+
+```javascript
+// Main process (main.js / main.ts)
+const { registerLlamaDesktopIpc } = require('llama-cpp-capacitor/desktop');
+registerLlamaDesktopIpc({ ipcMain, app });
+
+// Preload script
+require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer);
+
+// Renderer / Capacitor web layer — auto-selected via LlamaCppDesktop
+import { LlamaCpp } from 'llama-cpp-capacitor';
+const ctx = await LlamaCpp.initContext({ contextId: 0, params: { model: '/path/to/model.gguf' } });
+```
+
+#### Electron Builder config
+
+```javascript
+// electron-builder.config.js
+const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+module.exports = llama.merge({
+  appId: 'com.yourapp.id',
+  // ...your config
+});
+```
+
+#### Sidecar variant table
+
+| OS / arch | Variant | Accelerator | Script |
+|-----------|---------|-------------|--------|
+| macOS arm64 | `metal-coreml` | Metal + CoreML | `npm run build:sidecar:metal` |
+| macOS x64 | `metal` | Metal | `npm run build:sidecar` |
+| Linux x64 | `vulkan-openblas` | Vulkan + CPU | `npm run build:sidecar:linux` |
+| Windows x64 | `vulkan-openblas` | Vulkan + CPU | `npm run build:sidecar:win` |
+| Any | `cuda` | NVIDIA CUDA | `npm run build:sidecar:cuda` |
+| Linux | `rocm` | AMD ROCm | `npm run build:sidecar:rocm` |
+| Any | `cpu` | CPU only | `npm run build:sidecar:cpu` |
 
 ---
 
 ## Package Configuration
 
-### Configure package.json for Each Variant
+### `files` array in `package.json` (0.2.1 — current)
 
-The `files` array controls what gets included in the npm package.
-
-### Minimal Variant (Smallest, Recommended)
-
-**For public npm release:**
-
-```json
-{
-  "files": [
-    "android/src/main/jniLibs/",
-    "android/build.gradle",
-    "build-native.sh",
-    "build-variants.sh",
-    "dist/",
-    "ios/CMakeLists.txt",
-    "ios/CMakeLists-arm64.txt",
-    "ios/CMakeLists-x86_64.txt",
-    "ios/Sources",
-    "ios/Frameworks",
-    "Package.swift",
-    "LlamaCpp.podspec",
-    "LlamaCppCapacitor.podspec",
-    "types/"
-  ]
-}
-```
-
-**What's excluded:** `cpp/` (C++ sources) - saves ~13 MB
-
-**Size:** ~20 MB
-
-### Core Variant (With Sources)
-
-**For production with rebuild capability:**
+The current `package.json` includes all platforms:
 
 ```json
 {
@@ -255,12 +447,42 @@ The `files` array controls what gets included in the npm package.
     "android/src/main/",
     "android/build.gradle",
     "build-native.sh",
-    "build-variants.sh",
     "cpp/",
     "dist/",
     "ios/CMakeLists.txt",
     "ios/CMakeLists-arm64.txt",
     "ios/CMakeLists-x86_64.txt",
+    "ios/metal-embed.cmake",
+    "ios/embed-metal-shaders.sh",
+    "ios/Sources",
+    "ios/Frameworks",
+    "scripts/ensure-llama-ios-xcframework.sh",
+    "scripts/embed-llama-ios-app-framework.sh",
+    "Package.swift",
+    "LlamaCpp.podspec",
+    "LlamaCppCapacitor.podspec",
+    "types/",
+    "desktop/",
+    "sidecar/",
+    "cmake/",
+    "extraResources/",
+    "scripts/stage-desktop-resources.cjs",
+    "scripts/ensure-desktop-sidecar-bundle.cjs",
+    "scripts/build-sidecar.sh",
+    "scripts/build-sidecar-linux.sh",
+    "scripts/build-sidecar-win.bat"
+  ]
+}
+```
+
+### Minimal variant override (smallest package, no C++ sources)
+
+```json
+{
+  "files": [
+    "android/src/main/jniLibs/",
+    "android/build.gradle",
+    "dist/",
     "ios/Sources",
     "ios/Frameworks",
     "Package.swift",
@@ -271,507 +493,260 @@ The `files` array controls what gets included in the npm package.
 }
 ```
 
-**What's included:** `cpp/` - C++ sources for optional rebuilds
-
-**Size:** ~30-35 MB
-
-### Development Variant (Full)
-
-**For local development (NOT for npm):**
-
-```json
-{
-  "files": [
-    "android/",
-    "build-native.sh",
-    "build-variants.sh",
-    "cpp/",
-    "dist/",
-    "ios/",
-    "Package.swift",
-    "LlamaCpp.podspec",
-    "LlamaCppCapacitor.podspec",
-    "types/",
-    "scripts/",
-    "test/"
-  ]
-}
-```
-
-**Size:** ~50-60 MB
-
-### Switch Variants
-
-```bash
-# 1. Run build script
-./build-variants.sh --variant minimal
-
-# 2. Update package.json "files" array (use config above)
-
-# 3. Build
-npm run build
-
-# 4. Verify
-npm run verify:pack:artifacts
-
-# 5. Pack and publish
-npm pack --ignore-scripts
-npm publish
-```
+**Size:** ~23-25 MB (no `cpp/`, no `sidecar/`, no desktop scripts)
 
 ---
 
 ## Release Process
 
-### Pre-Release Steps
+### Step 1 — Bump version
 
-1. **Update Version**
-   ```bash
-   npm version minor  # 0.2.0-rc.0 → 0.2.0
-   # or manually: edit package.json version to "0.2.0"
-   ```
+```bash
+# Edit package.json "version" to "0.2.1"
+# Or use npm:
+npm version patch   # 0.2.0 → 0.2.1
+```
 
-2. **Update Documentation**
-   - CHANGELOG.md: Add release notes and size info
-   - README.md: Update package size
+### Step 2 — Clean
 
-3. **Test Build Locally**
-   ```bash
-   npm run build:package
-   ```
+```bash
+npm run clean:all
+```
 
-4. **Verify Artifacts**
-   ```bash
-   npm run verify:pack:artifacts
-   ```
+### Step 3 — Build all platforms
 
-### Release Steps
+```bash
+# Option A — full automated (recommended)
+./build-variants.sh --variant minimal
 
-1. **Check npm Login**
-   ```bash
-   npm whoami
-   ```
+# Option B — build each platform separately
+npm run build              # TypeScript
+npm run build:native       # iOS + Android
+npm run build:pwa          # WASM + Web Worker
+npm run build:desktop      # Desktop sidecar + staging (optional)
+```
 
-2. **Publish**
-   ```bash
-   npm publish
-   ```
+### Step 4 — Verify artifacts
 
-3. **Verify on npm Registry**
-   ```bash
-   npm view llama-cpp-capacitor@0.2.0
-   npm view llama-cpp-capacitor@0.2.0 dist
-   ```
+```bash
+npm run verify:pack:artifacts
+# Expected: iOS framework ✅, Android .so ✅, WASM ✅, dist/ ✅
+```
 
-### Expected Timeline
+### Step 5 — Create tarball
 
-| Step | Time |
-|------|------|
-| Build (TypeScript + Native + WASM) | 10-15 min |
-| Verify artifacts | 1-2 min |
-| Publish to npm | 1-2 min |
-| **Total** | **15-20 min** |
+```bash
+npm pack --ignore-scripts
+# Creates: llama-cpp-capacitor-0.2.1.tgz
+```
+
+### Step 6 — Inspect tarball
+
+```bash
+# Check contents
+tar -tzf llama-cpp-capacitor-0.2.1.tgz | head -40
+
+# Check size
+du -h llama-cpp-capacitor-0.2.1.tgz
+
+# Verify platform artifacts are present
+tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep -E "(ios|android|wasm|sidecar)"
+```
+
+### Step 7 — Publish
+
+```bash
+npm whoami      # confirm logged in
+npm publish
+npm view llama-cpp-capacitor@0.2.1
+```
 
 ---
 
 ## Pre-Release Checklist
 
-Before publishing to npm:
-
-- [ ] `package.json` version updated to `0.2.0`
-- [ ] `package.json` `files` array configured for chosen variant
-- [ ] `CHANGELOG.md` updated with release notes
-- [ ] Local build successful: `npm run build:package`
-- [ ] Artifacts verified: `npm run verify:pack:artifacts`
-- [ ] Package created: `npm pack --ignore-scripts` (~20 MB for minimal)
-- [ ] Package contents correct: `tar -tzf llama-cpp-capacitor-0.2.0.tgz | head -30`
-- [ ] npm login verified: `npm whoami`
-- [ ] Ready to publish: `npm publish`
-- [ ] Published successfully
-- [ ] Verified on npm registry: `npm view llama-cpp-capacitor@0.2.0`
+- [ ] `package.json` version set to `0.2.1`
+- [ ] `CHANGELOG.md` updated with 0.2.1 release notes
+- [ ] `npm run clean:all` completed
+- [ ] Build completed successfully (iOS + Android + WASM)
+- [ ] `npm run verify:pack:artifacts` — all green
+- [ ] `npm pack --ignore-scripts` — tarball created
+- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep ios/Frameworks` — iOS framework present
+- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep libllama-cpp` — Android .so present
+- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep wasm` — WASM assets present
+- [ ] `npm whoami` — logged in to npm
+- [ ] `npm publish` — published
+- [ ] `npm view llama-cpp-capacitor@0.2.1` — live on registry
 
 ---
 
 ## Environment Variables
 
-Control build behavior:
-
 ```bash
-# Strip debug symbols (default: true)
-STRIP_SYMBOLS=true ./build-variants.sh --variant minimal
+# Native builds
+STRIP_SYMBOLS=true     # Strip debug symbols (default: true for production variants)
+BUILD_JOBS=16          # Parallel CMake jobs (default: CPU count)
+VERBOSE=1              # Verbose build output
 
-# Keep debug symbols (for development)
-STRIP_SYMBOLS=false ./build-variants.sh --variant development
+# Android
+ANDROID_HOME=/path/to/sdk
+ANDROID_NDK_HOME=/path/to/ndk
 
-# Parallel build jobs (default: CPU count)
-BUILD_JOBS=16 ./build-variants.sh --variant minimal
+# WASM
+LLAMA_WASM_JSPI=1      # Enable JSPI async (default: 1)
+LLAMA_WASM_PTHREAD=0   # Enable pthreads (default: 0)
 
-# Verbose output
-VERBOSE=1 ./build-variants.sh --variant minimal
+# Desktop sidecar
+LLAMA_CPP_UPSTREAM=/path/to/upstream  # Sync upstream llama.cpp GPU backends
+OPENBLAS_ROOT=/path/to/openblas       # Custom OpenBLAS for Linux/Windows CPU builds
 
-# Combine variables
+# Combined example
 BUILD_JOBS=16 STRIP_SYMBOLS=true VERBOSE=1 ./build-variants.sh --variant minimal
 ```
 
+---
+
 ## Clean Scripts
 
-Clean up build artifacts:
-
 ```bash
-# Clean TypeScript compiled output
-npm run clean
-
-# Clean iOS and Android native builds
-npm run clean:native
-
-# Clean WASM/Rust artifacts
-npm run clean:wasm
-
-# Clean everything
-npm run clean:all
-
-# Clean test artifacts
-npm run clean:test
+npm run clean          # TypeScript dist only
+npm run clean:native   # iOS/Android build artifacts + Frameworks
+npm run clean:wasm     # Rust target, WASM pkg, dist/wasm
+npm run clean:all      # Everything above
+npm run clean:test     # Test output and coverage
 ```
 
 ---
 
 ## Common Issues
 
-### "Binary not found" error
+### "Binary not found" after build
 
 ```bash
-# Solution: Clean and rebuild
 npm run clean:native
 ./build-variants.sh --variant minimal
 ```
 
-### Package size larger than expected
+### iOS build skipped on non-macOS
+
+iOS builds require macOS + Xcode. On Linux/Windows, iOS is automatically skipped — this is expected. Build iOS on macOS, then copy the framework to `ios/Frameworks/`.
+
+### Android NDK not found
 
 ```bash
-# Create package and check size
-npm pack --ignore-scripts
-
-# Verify C++ sources not included for minimal
-tar -tzf llama-cpp-capacitor-0.2.0.tgz | grep "cpp/" | wc -l
-# Should output: 0
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$(ls $ANDROID_HOME/ndk | sort -V | tail -1)
+echo $ANDROID_NDK_HOME   # should print a path ending in a version number
 ```
 
-### Android SDK not found
+### WASM build fails
 
 ```bash
-# Set environment
-export ANDROID_HOME=/path/to/android/sdk
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/VERSION
-
-# Verify
-ls $ANDROID_HOME/ndk
-
-# Rebuild
-./build-variants.sh --variant minimal
-```
-
-### iOS build failed (macOS only)
-
-```bash
-# iOS requires macOS with Xcode
-# On Linux/Windows: automatically skipped
-
-# Verify Xcode installed
-xcode-select --install
-```
-
-### WASM build failed
-
-```bash
-# Check prerequisites
+# Check Emscripten is activated
+source /path/to/emsdk/emsdk_env.sh
 emcc --version
-rustc --version
-wasm-bindgen --version
 
-# Install missing
-cargo install wasm-bindgen-cli
+# Rebuild from scratch
+npm run clean:wasm
+npm run build:pwa
+```
 
-# Clear and rebuild
-rm -rf src-rust/target
-npm run build:wasm
+### Desktop sidecar not found
+
+```bash
+# Build for your host
+npm run build:sidecar        # auto-detects OS
+npm run stage:desktop        # copies to extraResources/
+```
+
+### Package larger than expected
+
+```bash
+# Check if C++ sources were accidentally included
+tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep "^package/cpp/" | wc -l
+# Should be 0 for minimal variant
 ```
 
 ---
 
 ## FAQ
 
-### Q: Should I publish minimal or core?
+### Q: Why is there both `prepublishOnly` and `build:package`?
 
-**A:** Start with **minimal** (20 MB) for smallest download. It's production-standard. Most npm packages don't include source code. Use core only if you want rebuild flexibility.
+`prepublishOnly` runs automatically on `npm publish`. `build:package` is the same script you can call manually to test without publishing.
 
-### Q: Why exclude C++ sources in minimal?
+### Q: Can I build only one platform?
 
-**A:** Users typically just use the library, not rebuild it. Sources add ~13 MB. Keep package small for faster downloads.
-
-### Q: Can users customize their build?
-
-**A:** Yes! Include build scripts in the package. After install:
+Yes:
 ```bash
-cd node_modules/llama-cpp-capacitor
-./build-variants.sh --variant core
+npm run build:ios      # iOS only
+npm run build:android  # Android only
+npm run build:pwa      # Web/WASM only
+npm run build:sidecar  # Desktop sidecar only
 ```
 
-### Q: Will this break my application?
+### Q: Which variant should I publish?
 
-**A:** No. Same APIs, same functionality. Only difference: smaller binaries (debug symbols removed).
+**Minimal** for the public npm package. It's ~23-25 MB, fully functional on all platforms, with no debug overhead.
 
-### Q: How long does building take?
+### Q: How do I rebuild the iOS XCFramework for simulators?
 
-**A:** Roughly:
-- Minimal: ~5 minutes
-- Core: ~5 minutes
-- Development: ~10 minutes
-
-Depends on CPU. Increase `BUILD_JOBS` for faster builds.
-
-### Q: Is stripping debug symbols safe for production?
-
-**A:** Yes, completely safe. Debug symbols are only for crash debugging. Production doesn't need them.
-
-### Q: Can I offer multiple variants on npm?
-
-**A:** Yes, but complex. You could publish:
-- `llama-cpp-capacitor` (minimal)
-- `llama-cpp-capacitor-full` (core)
-
-For simplicity, stick to one variant per release.
-
-### Q: What happens if I run npm publish directly?
-
-**A:** npm automatically runs the prepack hook, which builds everything:
-1. TypeScript
-2. iOS + Android
-3. WASM + PWA
-
-Everything gets packaged and published automatically. You can literally just run `npm publish` and you're done!
-
-### Q: Why is the package size different from what I expected?
-
-**A:** Check:
-1. Which variant you built: `./build-variants.sh --variant [name]`
-2. That strip symbols was enabled: `STRIP_SYMBOLS=true` (default)
-3. What's in the files array of package.json
-4. Run `npm pack --ignore-scripts` to create package and see actual size
-
-### Q: How do I track size changes over releases?
-
-**A:** After publishing each version:
 ```bash
-npm view llama-cpp-capacitor@0.1.0 dist
-npm view llama-cpp-capacitor@0.2.0 dist
-# Compare the sizes
+bash scripts/ensure-llama-ios-xcframework.sh
+npx cap sync ios
 ```
 
----
+### Q: How do I add a new C++ API symbol to iOS?
 
-## What Gets Published
+1. Declare in `cpp/cap-ios-bridge.h`
+2. Implement in `cpp/cap-ios-bridge.cpp` (add ABI alias at the bottom)
+3. Add `typealias` + `trySymOpt` call in `ios/Sources/LlamaCppCapacitor/LlamaNativeBridge.swift`
+4. Call from `ios/Sources/LlamaCppCapacitor/LlamaCpp.swift`
+5. Rebuild iOS framework
 
-### When Users Run: `npm install llama-cpp-capacitor`
+### Q: How do I wire a new JNI method on Android?
 
-They receive:
-
-```
-node_modules/llama-cpp-capacitor/
-├── dist/                       ← TypeScript compiled
-│   ├── esm/
-│   ├── plugin.cjs.js
-│   ├── wasm/                   ← WASM/PWA files
-│   └── ...
-│
-├── ios/
-│   ├── Frameworks/
-│   │   └── llama-cpp.framework/ ← iOS framework
-│   ├── Sources/
-│   └── ...
-│
-├── android/
-│   └── src/main/
-│       ├── jniLibs/arm64-v8a/
-│       │   └── libllama-cpp-arm64.so ← Android library
-│       └── ...
-│
-├── cpp/                         ← (for core variant only)
-│   └── [C++ sources]
-│
-├── types/
-│   └── llama-cpp-capacitor.d.ts
-│
-├── package.json
-├── build-variants.sh
-└── ...
-```
-
-### Estimated Sizes by Variant
-
-```
-Minimal:      ~23-25 MB ✅ (No sources, stripped, with PWA attempt)
-Core:         ~33-40 MB ✅ (With sources, stripped, with PWA attempt)
-Development:  ~55-70 MB ❌ (Debug, not for npm, with PWA attempt)
-Full:         ~75+ MB   ❌ (Everything, not recommended, with PWA attempt)
-
-Note: Sizes include PWA/WASM if build succeeds. Without PWA, subtract 2-3 MB.
-```
-
----
-
-## Size Reduction: Before vs After
-
-### 0.1.0 (Before Optimization)
-
-```
-iOS framework (all archs, debug):  5.3 MB
-Android library (all archs, debug): 48 MB
-C++ sources:                        13 MB
-JS/TS + metadata:                   3.7 MB
-───────────────────────────────────────
-Total:                              ~70 MB
-```
-
-### 0.2.0 Minimal (After Optimization)
-
-```
-iOS framework (arm64, stripped):    3-4 MB
-Android library (arm64, stripped):  15-16 MB
-JS/TS + metadata:                   1-2 MB
-───────────────────────────────────────
-Total (without PWA):                ~20 MB
-
-With optional PWA/WASM:             ~23-25 MB
-```
-
-### Achievement: **71% Reduction** ✅
-
----
-
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Publish
-
-on:
-  release:
-    types: [created]
-
-jobs:
-  publish:
-    runs-on: macos-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - name: Clean
-        run: npm run clean:native
-      
-      - name: Build minimal variant
-        run: ./build-variants.sh --variant minimal
-      
-      - name: Build TypeScript
-        run: npm run build
-      
-      - name: Verify artifacts
-        run: npm run verify:pack:artifacts
-      
-      - name: Publish to npm
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-```
+1. Declare `private native ...` in `android/.../LlamaCpp.java`
+2. Add `JNIEXPORT` function in `android/src/main/jni.cpp` (or relevant `jni-*.cpp`)
+3. Call `nativeMethod(...)` from the Java method body
+4. Rebuild Android
 
 ---
 
 ## Key Commands Reference
 
-### Build Commands
-
 ```bash
-# Build any variant (all except ios-only/android-only automatically attempt PWA/WASM)
-./build-variants.sh --variant minimal       # ~23-25 MB (recommended)
-./build-variants.sh --variant core          # ~33-40 MB
-./build-variants.sh --variant development   # ~55-70 MB
-./build-variants.sh --variant ios-only      # ~8-10 MB (no PWA)
-./build-variants.sh --variant android-only  # ~25-30 MB (no PWA)
+# Build all platforms
+./build-variants.sh --variant minimal
 
-# Compile TypeScript
-npm run build
+# Build individual platforms
+npm run build              # TypeScript
+npm run build:native       # iOS + Android
+npm run build:pwa          # Web/WASM + worker
+npm run build:desktop      # Desktop sidecar
+npm run build:ios:xcframework  # iOS Simulator XCFramework
 
-# Verify everything is correct
+# Verify and package
 npm run verify:pack:artifacts
-```
-
-### Package Commands
-
-```bash
-# Create package file
 npm pack --ignore-scripts
 
-# Check contents
-tar -tzf llama-cpp-capacitor-0.2.0.tgz | head -30
-
-# Count files
-tar -tzf llama-cpp-capacitor-0.2.0.tgz | wc -l
-```
-
-### Release Commands
-
-```bash
-# Update version
-npm version minor  # or patch, major
-
-# Publish to npm
+# Release
+npm version patch   # bump 0.2.0 → 0.2.1
 npm publish
 
-# Verify on npm registry
-npm view llama-cpp-capacitor@0.2.0
-npm view llama-cpp-capacitor@0.2.0 dist
+# Clean
+npm run clean:all
+
+# Inspect tarball
+tar -tzf llama-cpp-capacitor-0.2.1.tgz | head -40
+du -h llama-cpp-capacitor-0.2.1.tgz
 ```
-
----
-
-## Next Steps
-
-1. **Decide on variant:** minimal (default) or core?
-2. **Update package.json:** `files` array for your variant
-3. **Update version:** Change to `0.2.0` from `0.2.0-rc.0`
-4. **Update docs:** CHANGELOG.md, README.md
-5. **Test build:** `npm run build:package`
-6. **Publish:** `npm publish`
-7. **Verify:** `npm view llama-cpp-capacitor@0.2.0`
-
----
-
-## Summary
-
-**One Line:** `npm publish`
-
-**Recommended:** Minimal variant (~20 MB) for public npm release
-
-**Timeline:** 15-20 minutes from build start to published on npm
-
-**Result:** Users get iOS + Android + WASM in one package
 
 ---
 
 ## Document Info
 
 - **Package:** llama-cpp-capacitor
-- **Version:** 0.2.0
-- **Updated:** January 31, 2025
-- **Consolidation:** RELEASE_0.2.0_FINAL.md + PACKAGE_CONFIG_VARIANTS.md + README_BUILD_SYSTEM.md
-
----
-
-**Ready to release! 🚀**
-
+- **Version:** 0.2.1
+- **Updated:** 2025-07-07
+- **Covers:** iOS, Android, Web/PWA, Desktop (Electron + sidecar)

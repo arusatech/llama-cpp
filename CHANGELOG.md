@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] - 2025-01-24
+## [0.2.1] - 2025-07-07
+
+### Added
+- **Full cross-platform gap closure** — All 47 methods in `LlamaCppPlugin` are now fully implemented on iOS, Android, Web/PWA, and Desktop. Zero stubs remain.
+- **iOS — Session management** (`loadSession`/`saveSession`): Wired to `llama_load_session_file` / `llama_save_session_file` via new `LlamaNativeBridge` symbols. KV-cache state is correctly persisted and restored.
+- **iOS — LoRA adapters** (`applyLoraAdapters`, `removeLoraAdapters`, `getLoadedLoraAdapters`): Now call `llama_apply_lora_adapters`, `llama_remove_lora_adapters`, `llama_get_loaded_lora_adapters` via `dlsym`.
+- **iOS — Multimodal** (`initMultimodal`, `isMultimodalEnabled`, `getMultimodalSupport`, `releaseMultimodal`): Wired to `llama_init_multimodal`, `llama_is_multimodal_enabled`, `llama_get_multimodal_support`, `llama_release_multimodal`.
+- **iOS — TTS/Vocoder** (all 6 methods): Wired to `llama_init_vocoder`, `llama_get_formatted_audio_completion`, `llama_get_audio_completion_guide_tokens`, `llama_decode_audio_tokens`, `llama_release_vocoder`.
+- **iOS — Rerank**: Replaced empty-array stub with real `llama_rerank_json` → `completion::rerank()` call.
+- **iOS — Bench**: Replaced `"[]"` stub with real `llama_bench` → `completion::bench()` call.
+- **iOS — GPU reporting**: `initContext` now queries `llama_get_context_gpu_info` and surfaces actual Metal usage in the `gpu` / `reasonNoGPU` fields.
+- **iOS — Download management**: Replaced blocking `Data(contentsOf:)` with `URLSession` + `URLSessionDownloadDelegate` for real streaming progress tracking and cancellable downloads.
+- **Android — LoRA adapters**: Java `applyLoraAdapters`, `removeLoraAdapters`, `getLoadedLoraAdapters` now call their JNI counterparts in `jni-lora.cpp` (was no-op).
+- **Android — Multimodal**: Java `initMultimodal`, `isMultimodalEnabled`, `getMultimodalSupport`, `releaseMultimodal` now call through to `jni-multimodal.cpp` (was flag-only).
+- **Android — TTS/Vocoder**: Java `initVocoder`, `getFormattedAudioCompletion`, `getAudioCompletionGuideTokens`, `decodeAudioTokens`, `releaseVocoder` now call through to `jni-tts.cpp` (was flag-only).
+- **Android — Session management**: Java `loadSession`/`saveSession` now call `loadSessionNative`/`saveSessionNative` backed by `llama_state_load_file` / `llama_state_save_file`.
+- **Android — Rerank**: Replaced `Math.random()` mock with real `rerankNative` JNI call backed by `completion::rerank()`.
+- **Android — Bench**: Replaced `"[]"` stub with `benchNative` → `completion::bench()`.
+- **Android — Completion param propagation**: All 20+ sampling parameters now extracted from `JSObject` and forwarded to `common_params::sampling` (previously only `temperature`, `n_predict`, `prompt`).
+- **Android — GPU reporting**: `initContext` now queries `modelInfoNative` and reflects actual Vulkan/GPU availability.
+- **Web — `getFormattedChat`**: Delegates to `provider.getFormattedChat` when available (WASM Jinja path), with 4-template client-side fallback.
+- **Web — `chat()`**: Now uses `getFormattedChat` internally for proper template formatting instead of naive role-prefix concatenation.
+- **Web — Completion params**: All sampling parameters forwarded to provider (`top_p`, `top_k`, `min_p`, `repeat_penalty`, `seed`, `stop`, `grammar`).
+- **C++ — New public ABI symbols** in `cap-ios-bridge.h`/`cap-ios-bridge.cpp`: `llama_rerank_json`, `llama_bench`, `llama_load_session_file`, `llama_save_session_file`, `llama_apply_lora_adapters`, `llama_remove_lora_adapters`, `llama_get_loaded_lora_adapters`, `llama_init_multimodal`, `llama_is_multimodal_enabled`, `llama_get_multimodal_support`, `llama_release_multimodal`, `llama_init_vocoder`, `llama_is_vocoder_enabled`, `llama_get_formatted_audio_completion`, `llama_get_audio_completion_guide_tokens`, `llama_decode_audio_tokens`, `llama_release_vocoder`, `llama_get_context_gpu_info`.
+- **Documentation — Feature Coverage Matrix**: Added full 47-method cross-platform matrix to `README.md`.
+- **Documentation — Build guides**: `README_BUILD_SYSTEM.md` and `BUILD_GUIDE.md` updated to cover iOS, Android, Web/PWA, and Desktop with step-by-step instructions for all platforms.
+
+### Fixed
+- **Android `rerank`**: Was returning random scores (`Math.random()`) — now correctly calls native reranking.
+- **iOS/Android `bench`**: Was returning empty `"[]"` — now returns real pp/tg performance data.
+- **iOS/Android `loadSession`/`saveSession`**: Was returning hardcoded zeros — now persists/restores actual KV-cache state.
+- **iOS/Android LoRA**: Was silently succeeding with no effect — now applies/removes adapters natively.
+- **iOS/Android Multimodal `getMultimodalSupport`**: Was hardcoded `{vision:true, audio:true}` — now queries actual model capabilities.
+- **iOS/Android TTS**: All vocoder methods were stubs — now fully operational.
+- **Android completion `stop` array**: Was silently ignored — now parsed and forwarded as `antiprompt` to llama.cpp.
+
+
 
 ### Changed
 - **App store size**: Build only **arm64-v8a** for Android (drop armeabi-v7a); strip iOS framework and Android `.so` debug symbols. See `APP_STORE_SIZE.md`.

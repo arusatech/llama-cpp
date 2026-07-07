@@ -1,6 +1,6 @@
 {
   "name": "llama-cpp-capacitor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference with chat-first API design. Complete iOS and Android support: text generation, chat, multimodal, TTS, LoRA, embeddings, and more.",
   "main": "dist/plugin.cjs.js",
   "type": "module",
