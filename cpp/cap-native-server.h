@@ -13,7 +13,7 @@ extern "C" {
 
 /**
  * Start the server on a background thread. Loads the model via llama_init_context.
- * @param model_path Absolute path to the GGUF file (e.g. under app storage).
+ * @param model_path Optional GGUF path to load at startup; omit to load via HTTP later.
  * @param host Bind address; use "127.0.0.1" for loopback-only.
  * @param port TCP port (e.g. 8080).
  * @param params_json Optional JSON for llama_init_context (n_ctx, n_gpu_layers, etc.).

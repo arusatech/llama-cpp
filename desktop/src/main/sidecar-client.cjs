@@ -63,6 +63,13 @@ function createSidecarClient(port, deps) {
     embeddings: (body, timeoutMs = 60000) =>
       request('POST', '/v1/embeddings', body, timeoutMs),
     models: () => request('GET', '/v1/models', null, 5000),
+    memory: () => request('GET', '/v1/internal/memory', null, 5000),
+    loadModel: (body, timeoutMs = 300000) =>
+      request('POST', '/v1/internal/models/load', body, timeoutMs),
+    unloadModel: (modelId, timeoutMs = 60000) =>
+      request('DELETE', `/v1/internal/models/${encodeURIComponent(modelId)}`, null, timeoutMs),
+    setContextLimit: (limit, timeoutMs = 5000) =>
+      request('POST', '/v1/internal/context-limit', { limit }, timeoutMs),
   };
 }
 

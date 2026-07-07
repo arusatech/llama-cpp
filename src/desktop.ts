@@ -58,6 +58,7 @@ export class LlamaCppDesktop extends LlamaCppWeb {
     if (bridge?.ensureSidecar) {
       const result = await bridge.ensureSidecar({
         modelPath,
+        modelId: params.model,
         n_ctx: params.n_ctx,
         n_gpu_layers: params.n_gpu_layers,
         n_threads: params.n_threads,
@@ -65,9 +66,17 @@ export class LlamaCppDesktop extends LlamaCppWeb {
       });
       if (result?.ok && result.port) {
         this.desktopProvider.setSidecarPort(result.port);
+        await this.desktopProvider.loadModel({
+          modelId: params.model,
+          modelPath,
+          n_ctx: params.n_ctx,
+          n_gpu_layers: params.n_gpu_layers,
+          n_threads: params.n_threads,
+          embedding: params.embedding,
+        });
         this.sidecarActive = true;
         this.gpuEnabled = !!result.gpuEnabled;
-        this.contextToModel.set(contextId, modelPath);
+        this.contextToModel.set(contextId, params.model);
         return {
           contextId,
           gpu: this.gpuEnabled,
@@ -80,6 +89,18 @@ export class LlamaCppDesktop extends LlamaCppWeb {
     const fallback = await super.initContext({ contextId, params });
     this.sidecarActive = false;
     return fallback;
+  }
+
+  async setContextLimit(opts: { limit: number }): Promise<void> {
+    await this.desktopProvider.setContextLimit(opts.limit);
+  }
+
+  override async releaseContext({ contextId }: { contextId: number }): Promise<void> {
+    const modelId = this.contextToModel.get(contextId);
+    if (modelId && this.sidecarActive) {
+      await this.desktopProvider.unloadModel(modelId);
+    }
+    await super.releaseContext({ contextId });
   }
 
   override async startNativeLlamaServer(options: {

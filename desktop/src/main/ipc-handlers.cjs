@@ -7,12 +7,14 @@
  */
 
 const { detectBackend, createSidecarManager, setUserOverride } = require('./index.cjs');
+const os = require('os');
 
 const CHANNEL_ENSURE = 'llama-desktop:ensure-sidecar';
 const CHANNEL_STOP = 'llama-desktop:stop-sidecar';
 const CHANNEL_STATUS = 'llama-desktop:sidecar-status';
 const CHANNEL_BACKEND = 'llama-desktop:backend-status';
 const CHANNEL_OVERRIDE = 'llama-desktop:set-backend-override';
+const CHANNEL_MEMORY = 'llama-desktop:memory-snapshot';
 
 /**
  * @param {object} opts
@@ -30,11 +32,6 @@ function registerLlamaDesktopIpc(opts) {
   let lastSelection = null;
 
   ipcMain.handle(CHANNEL_ENSURE, async (_evt, payload) => {
-    const modelPath = payload && payload.modelPath;
-    if (!modelPath) {
-      return { ok: false, reason: 'model-path-required' };
-    }
-
     const { selection } = detectBackend(opts && opts.deps);
     lastSelection = selection;
 
@@ -42,14 +39,19 @@ function registerLlamaDesktopIpc(opts) {
       return { ok: false, reason: 'wasm-fallback', selection };
     }
 
-    const result = await manager.start({
-      modelPath,
-      selection,
-      n_ctx: payload.n_ctx,
-      n_gpu_layers: payload.n_gpu_layers,
-      n_threads: payload.n_threads,
-      retryCpu: true,
-    });
+    const st = manager.getStatus();
+    let result = { ok: true, port: st.port };
+    if (!st.running) {
+      result = await manager.start({
+        modelPath: payload && payload.modelPath,
+        modelId: payload && payload.modelId,
+        selection,
+        n_ctx: payload && payload.n_ctx,
+        n_gpu_layers: payload && payload.n_gpu_layers,
+        n_threads: payload && payload.n_threads,
+        retryCpu: true,
+      });
+    }
 
     if (!result.ok) {
       return { ...result, selection };
@@ -94,6 +96,19 @@ function registerLlamaDesktopIpc(opts) {
     return { ok: true };
   });
 
+  ipcMain.handle(CHANNEL_MEMORY, async () => {
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    const usedBytes = totalBytes - freeBytes;
+    const usedRatio = totalBytes > 0 ? usedBytes / totalBytes : 0;
+    return {
+      totalBytes,
+      usedBytes,
+      freeBytes,
+      pressure: usedRatio >= 0.85 ? 'high' : usedRatio >= 0.7 ? 'medium' : 'low',
+    };
+  });
+
   if (opts && opts.app) {
     opts.app.on('before-quit', () => {
       manager.stop().catch(() => {});
@@ -101,7 +116,7 @@ function registerLlamaDesktopIpc(opts) {
   }
 
   return { manager, channels: {
-    CHANNEL_ENSURE, CHANNEL_STOP, CHANNEL_STATUS, CHANNEL_BACKEND, CHANNEL_OVERRIDE,
+    CHANNEL_ENSURE, CHANNEL_STOP, CHANNEL_STATUS, CHANNEL_BACKEND, CHANNEL_OVERRIDE, CHANNEL_MEMORY,
   }};
 }
 

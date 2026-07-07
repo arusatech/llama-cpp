@@ -170,10 +170,15 @@ function createSidecarManager(deps) {
 
   function buildSpawnArgs(modelPath, port, opts) {
     const args = [
-      '--model', modelPath,
       '--host', '127.0.0.1',
       '--port', String(port),
     ];
+    if (modelPath) {
+      args.push('--model', modelPath);
+      if (opts && opts.modelId) {
+        args.push('--model-id', String(opts.modelId));
+      }
+    }
     if (opts && opts.n_ctx) {
       args.push('--ctx-size', String(opts.n_ctx));
     }
@@ -214,9 +219,6 @@ function createSidecarManager(deps) {
 
     const selection = options && options.selection;
     const modelPath = options && options.modelPath;
-    if (!modelPath) {
-      return { ok: false, reason: 'model-path-required' };
-    }
 
     if (status.running && status.port) {
       return { ok: true, port: status.port };

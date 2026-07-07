@@ -13,6 +13,7 @@ export type WasmAdmissionContext = {
   wasmLinearBytes?: number;
   wasmPoolCeilingBytes?: number;
   loadOpts?: ModelLoadMemoryOpts;
+  skipWasm?: boolean;
 };
 
 export interface Scheduler {
@@ -54,27 +55,29 @@ export class DefaultModelScheduler implements Scheduler {
     const loadOpts = wasm?.loadOpts;
     const estimatedFootprint = estimateModelWasmFootprint(modelBytes, loadOpts ?? {});
 
-    const wasmAdmission = canAdmitWasmModelLoad({
-      modelId,
-      fileBytes: modelBytes,
-      loadOpts,
-      currentlyLoaded: this.loaded.size,
-      maxModels: this.maxModels,
-      wasmLinearBytes: wasm?.wasmLinearBytes,
-      wasmPoolCeilingBytes: wasm?.wasmPoolCeilingBytes ?? WASM_POOL_CEILING_BYTES,
-      loadedFootprintBytes: this.totalFootprintBytes(),
-      reserveBytes,
-      browserMemory: memory,
-    });
-    if (!wasmAdmission.allow) {
-      const code =
-        wasmAdmission.deniedBy === 'limit' ? 'MODEL_LIMIT_REACHED' : 'INSUFFICIENT_MEMORY';
-      throw new LlmError(code, wasmAdmission.reason ?? 'WASM model admission rejected', {
+    if (!wasm?.skipWasm) {
+      const wasmAdmission = canAdmitWasmModelLoad({
         modelId,
-        estimatedBytes: wasmAdmission.estimatedFootprintBytes,
-        projectedWasmBytes: wasmAdmission.projectedWasmBytes,
-        deniedBy: wasmAdmission.deniedBy,
+        fileBytes: modelBytes,
+        loadOpts,
+        currentlyLoaded: this.loaded.size,
+        maxModels: this.maxModels,
+        wasmLinearBytes: wasm?.wasmLinearBytes,
+        wasmPoolCeilingBytes: wasm?.wasmPoolCeilingBytes ?? WASM_POOL_CEILING_BYTES,
+        loadedFootprintBytes: this.totalFootprintBytes(),
+        reserveBytes,
+        browserMemory: memory,
       });
+      if (!wasmAdmission.allow) {
+        const code =
+          wasmAdmission.deniedBy === 'limit' ? 'MODEL_LIMIT_REACHED' : 'INSUFFICIENT_MEMORY';
+        throw new LlmError(code, wasmAdmission.reason ?? 'WASM model admission rejected', {
+          modelId,
+          estimatedBytes: wasmAdmission.estimatedFootprintBytes,
+          projectedWasmBytes: wasmAdmission.projectedWasmBytes,
+          deniedBy: wasmAdmission.deniedBy,
+        });
+      }
     }
 
     const admission = canAdmitModel({

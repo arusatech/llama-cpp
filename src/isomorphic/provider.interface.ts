@@ -54,6 +54,8 @@ export interface MemorySnapshot {
   freeBytes?: number;
   usedBytes?: number;
   pressure: 'low' | 'medium' | 'high' | 'unknown';
+  loadedModelCount?: number;
+  maxModels?: number;
 }
 
 export interface LlmProvider {

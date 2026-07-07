@@ -98,6 +98,7 @@ See also [docs/DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md) (accelerat
 ### Desktop (Windows, macOS, Linux)
 
 - **Architecture:** Electron + native sidecar + WASM fallback ([docs/DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md))
+- **Concurrent models:** up to **5** resident GGUF contexts on the sidecar (same as iOS/Android/Web); `DefaultModelScheduler` + OS memory admission in renderer; sidecar enforces limit via `/v1/internal/models/load`
 - **Accelerators:** NVIDIA CUDA, AMD ROCm/Radeon, Intel OpenVINO, Apple Metal/CoreML, Vulkan (cross-vendor GPU), CPU (OpenBLAS/Accelerate)
 - **Build sidecar:** `npm run build:sidecar` (macOS: `npm run build:sidecar:metal`; GPU: `build:sidecar:cuda` / `build:sidecar:rocm`)
 - **Stage for packaging:** `npm run build:desktop` → copies sidecar + WASM to `extraResources/`

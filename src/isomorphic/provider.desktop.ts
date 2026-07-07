@@ -8,21 +8,28 @@ import type {
   PlatformKind,
   TokenEvent,
 } from './provider.interface';
-import { getDesktopSidecarPort } from './desktop.runtime';
+import { getDesktopBridge, getDesktopSidecarPort } from './desktop.runtime';
 import { readSidecarSseTokens } from './sidecar-sse';
 import { WebProvider } from './provider.web';
 import { LlmError } from './errors';
+import { DefaultModelScheduler } from './model.scheduler';
+import { WASM_MAX_CONCURRENT_MODELS } from './wasmMemoryPolicy';
 import type { DetokenizeResult, TokenizeResult } from '../workers/wasm.engine';
+
+const MAX_MODELS = WASM_MAX_CONCURRENT_MODELS;
 
 /**
  * Desktop LLM provider: native sidecar (HTTP) for GPU/CPU inference;
  * WASM worker for multimodal, LoRA, TTS, bench (inherited via composition).
+ * Sidecar path supports up to 5 concurrent models with admission control.
  */
 export class DesktopProvider extends WebProvider {
   override readonly platform: PlatformKind = 'desktop';
 
   private sidecarPort: number | null = null;
-  private activeModelPath: string | null = null;
+  private sidecarScheduler = new DefaultModelScheduler(MAX_MODELS);
+  private sidecarLoadedModels = new Set<string>();
+  private modelPaths = new Map<string, string>();
 
   private getPort(): number {
     if (this.sidecarPort != null) return this.sidecarPort;
@@ -46,9 +53,30 @@ export class DesktopProvider extends WebProvider {
     }
   }
 
+  private async getDesktopMemorySnapshot(): Promise<MemorySnapshot> {
+    const bridge = getDesktopBridge();
+    if (bridge?.getMemorySnapshot) {
+      return bridge.getMemorySnapshot();
+    }
+    return super.getMemorySnapshot();
+  }
+
+  private mapSidecarHttpError(status: number, text: string): LlmError {
+    if (status === 429 || text.includes('model_limit_reached') || text.includes('Model limit')) {
+      return new LlmError('MODEL_LIMIT_REACHED', text.slice(0, 200));
+    }
+    if (text.includes('INSUFFICIENT') || text.includes('memory')) {
+      return new LlmError('INSUFFICIENT_MEMORY', text.slice(0, 200));
+    }
+    if (status === 404 && text.includes('model_not_found')) {
+      return new LlmError('MODEL_NOT_LOADED', text.slice(0, 200));
+    }
+    return new LlmError('INFERENCE_FAILED', `Sidecar HTTP ${status}: ${text.slice(0, 200)}`);
+  }
+
   private async sidecarFetch<T>(
     path: string,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     body?: unknown,
     timeoutMs = 120000,
   ): Promise<T> {
@@ -64,7 +92,7 @@ export class DesktopProvider extends WebProvider {
       });
       if (!res.ok) {
         const text = await res.text();
-        throw new LlmError('INFERENCE_FAILED', `Sidecar HTTP ${res.status}: ${text.slice(0, 200)}`);
+        throw this.mapSidecarHttpError(res.status, text);
       }
       const ct = res.headers.get('content-type') ?? '';
       if (ct.includes('application/json')) {
@@ -74,6 +102,58 @@ export class DesktopProvider extends WebProvider {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async ensureSidecarProcess(opts?: InitializeOptions): Promise<void> {
+    if (this.sidecarAvailable()) {
+      return;
+    }
+    const bridge = getDesktopBridge();
+    if (!bridge?.ensureSidecar) {
+      throw new LlmError(
+        'NATIVE_PLUGIN_UNAVAILABLE',
+        'Desktop IPC bridge not available — register ipc-handlers in Electron main.',
+      );
+    }
+    const payload: Parameters<NonNullable<ReturnType<typeof getDesktopBridge>>['ensureSidecar']>[0] = {
+      modelId: opts?.modelId,
+      n_ctx: opts?.n_ctx,
+      n_gpu_layers: opts?.n_gpu_layers,
+      n_threads: opts?.n_threads,
+      embedding: opts?.embedding,
+    };
+    if (opts?.modelPath) {
+      payload.modelPath = opts.modelPath;
+    }
+    const result = await bridge.ensureSidecar(payload);
+    if (!result?.ok || !result.port) {
+      throw new LlmError(
+        'NATIVE_PLUGIN_UNAVAILABLE',
+        `Sidecar failed to start: ${result?.reason ?? 'unknown'}`,
+      );
+    }
+    this.setSidecarPort(result.port);
+  }
+
+  private requireSidecarModel(modelId: string): void {
+    if (!this.sidecarLoadedModels.has(modelId)) {
+      throw new LlmError('MODEL_NOT_LOADED', `Model '${modelId}' is not loaded on desktop sidecar`);
+    }
+  }
+
+  async setContextLimit(limit: number): Promise<void> {
+    const clamped = Math.min(MAX_MODELS, Math.max(1, Math.floor(limit)));
+    this.sidecarScheduler = new DefaultModelScheduler(clamped);
+    for (const modelId of this.sidecarLoadedModels) {
+      this.sidecarScheduler.markLoaded(modelId);
+    }
+    if (this.sidecarAvailable()) {
+      await this.sidecarFetch('/v1/internal/context-limit', 'POST', { limit: clamped }, 5000);
+    }
+  }
+
+  listLoadedModels(): string[] {
+    return this.sidecarScheduler.listLoaded();
   }
 
   private async sidecarStreamChat(
@@ -158,32 +238,96 @@ export class DesktopProvider extends WebProvider {
   }
 
   override async initialize(opts: InitializeOptions): Promise<void> {
-    this.activeModelPath = opts.modelPath ?? opts.modelId;
+    if (!this.sidecarAvailable()) {
+      await this.ensureSidecarProcess(opts);
+    }
     if (!this.sidecarAvailable()) {
       await super.initialize(opts);
+      return;
     }
+    await this.loadModel(opts);
   }
 
   override async loadModel(opts: InitializeOptions): Promise<void> {
-    await this.initialize(opts);
+    if (!opts.modelId) {
+      throw new LlmError('INVALID_REQUEST', 'modelId is required');
+    }
+
+    await this.ensureSidecarProcess(opts);
     if (!this.sidecarAvailable()) {
       await super.loadModel(opts);
+      return;
     }
+
+    if (this.sidecarLoadedModels.has(opts.modelId)) {
+      return;
+    }
+
+    const modelPath = opts.modelPath ?? opts.modelId;
+    const modelBytes = typeof opts.modelBytes === 'number' ? opts.modelBytes : 0;
+    const reserveBytes = typeof opts.reserveBytes === 'number' ? opts.reserveBytes : undefined;
+    const memory = await this.getDesktopMemorySnapshot();
+    if (typeof opts.availableMemoryBytes === 'number') {
+      memory.freeBytes = opts.availableMemoryBytes;
+    }
+    if (typeof opts.totalMemoryBytes === 'number') {
+      memory.totalBytes = opts.totalMemoryBytes;
+    }
+    this.sidecarScheduler.ensureCapacity(opts.modelId, modelBytes, memory, reserveBytes, {
+      skipWasm: true,
+      loadOpts: { n_ctx: opts.n_ctx, embedding: opts.embedding },
+    });
+
+    await this.sidecarFetch(
+      '/v1/internal/models/load',
+      'POST',
+      {
+        model_id: opts.modelId,
+        path: modelPath,
+        n_ctx: opts.n_ctx,
+        n_gpu_layers: opts.n_gpu_layers,
+        n_threads: opts.n_threads,
+        embedding: opts.embedding,
+      },
+      300000,
+    );
+
+    this.sidecarLoadedModels.add(opts.modelId);
+    this.modelPaths.set(opts.modelId, modelPath);
+    this.sidecarScheduler.markLoaded(opts.modelId, modelBytes, {
+      n_ctx: opts.n_ctx,
+      embedding: opts.embedding,
+    });
   }
 
   override async unloadModel(modelId: string): Promise<void> {
     if (!this.sidecarAvailable()) {
       await super.unloadModel(modelId);
+      return;
     }
-    if (modelId === this.activeModelPath) {
-      this.activeModelPath = null;
+    if (!this.sidecarLoadedModels.has(modelId)) {
+      return;
     }
+    try {
+      await this.sidecarFetch(
+        `/v1/internal/models/${encodeURIComponent(modelId)}`,
+        'DELETE',
+        undefined,
+        60000,
+      );
+    } catch {
+      /* model may already be gone on sidecar */
+    }
+    this.sidecarLoadedModels.delete(modelId);
+    this.modelPaths.delete(modelId);
+    this.sidecarScheduler.markUnloaded(modelId);
   }
 
   override async generate(req: GenerateRequest): Promise<GenerateResult> {
     if (!this.sidecarAvailable()) {
       return super.generate(req);
     }
+    this.requireSidecarModel(req.modelId);
     if (req.messages && req.messages.length > 0) {
       const data = await this.sidecarFetch<{
         choices?: Array<{ message?: { content?: string } }>;
@@ -228,6 +372,7 @@ export class DesktopProvider extends WebProvider {
     if (!this.sidecarAvailable()) {
       return super.generateStream(req, onToken);
     }
+    this.requireSidecarModel(req.modelId);
     if (req.messages && req.messages.length > 0) {
       return this.sidecarStreamChat(req, onToken);
     }
@@ -238,6 +383,7 @@ export class DesktopProvider extends WebProvider {
     if (!this.sidecarAvailable()) {
       return super.embed(req);
     }
+    this.requireSidecarModel(req.modelId);
     const input = Array.isArray(req.input) ? req.input : [req.input];
     const data = await this.sidecarFetch<{
       data?: Array<{ embedding?: number[] }>;
@@ -263,7 +409,20 @@ export class DesktopProvider extends WebProvider {
     if (!this.sidecarAvailable()) {
       return super.getMemorySnapshot();
     }
-    return { pressure: 'low' };
+    const memory = await this.getDesktopMemorySnapshot();
+    try {
+      const reg = await this.sidecarFetch<{
+        loaded_count?: number;
+        max_models?: number;
+      }>('/v1/internal/memory', 'GET', undefined, 5000);
+      return {
+        ...memory,
+        loadedModelCount: reg.loaded_count,
+        maxModels: reg.max_models,
+      };
+    } catch {
+      return memory;
+    }
   }
 
   override async health(): Promise<{ ok: boolean; details?: Record<string, unknown> }> {
@@ -271,10 +430,21 @@ export class DesktopProvider extends WebProvider {
       return super.health();
     }
     try {
-      const h = await this.sidecarFetch<{ status?: string }>('/health', 'GET', undefined, 5000);
+      const h = await this.sidecarFetch<{ status?: string; registry?: Record<string, unknown> }>(
+        '/health',
+        'GET',
+        undefined,
+        5000,
+      );
       return {
         ok: h.status === 'ok',
-        details: { backend: 'sidecar', port: this.getPort(), platform: 'desktop' },
+        details: {
+          backend: 'sidecar',
+          port: this.getPort(),
+          platform: 'desktop',
+          loadedModels: this.listLoadedModels(),
+          registry: h.registry,
+        },
       };
     } catch (err) {
       return { ok: false, details: { error: String(err) } };

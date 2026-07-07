@@ -2,6 +2,8 @@
  * Detect desktop (Electron / Tauri / Node) runtime vs mobile browser.
  */
 
+import type { MemorySnapshot } from './provider.interface';
+
 export function isElectronRuntime(): boolean {
   if (typeof process !== 'undefined' && process.versions && process.versions.electron) {
     return true;
@@ -32,7 +34,8 @@ export function getDesktopSidecarPort(): number | null {
 
 export type DesktopBridge = {
   ensureSidecar: (opts: {
-    modelPath: string;
+    modelPath?: string;
+    modelId?: string;
     host?: string;
     port?: number;
     n_ctx?: number;
@@ -45,11 +48,13 @@ export type DesktopBridge = {
     gpuEnabled?: boolean;
     gpuBackend?: string | null;
     reasonNoGpu?: string;
+    reason?: string;
   }>;
   stopSidecar?: () => Promise<void>;
   getSidecarStatus?: () => Promise<{ running: boolean; port?: number | null; backend?: string | null }>;
   getBackendStatus?: () => Promise<Record<string, unknown>>;
   setBackendOverride?: (value: string) => Promise<void>;
+  getMemorySnapshot?: () => Promise<MemorySnapshot>;
 };
 
 export function getDesktopBridge(): DesktopBridge | null {

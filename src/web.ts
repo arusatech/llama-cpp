@@ -131,8 +131,8 @@ export class LlamaCppWeb implements LlamaCppPlugin {
     // No-op on web; no native log callback to toggle.
   }
 
-  async setContextLimit(): Promise<void> {
-    // No-op; WebProvider manages its own slot limit via DefaultModelScheduler.
+  async setContextLimit(_opts?: { limit: number }): Promise<void> {
+    // No-op on web; WebProvider manages its own slot limit via DefaultModelScheduler.
   }
 
   async modelInfo({ path }: { path: string; skip?: string[] }): Promise<Object> {

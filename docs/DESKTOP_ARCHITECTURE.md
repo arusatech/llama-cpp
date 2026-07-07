@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Desktop support extends the existing **iOS + Android + PWA** stack with a fourth target:
+Desktop support extends the existing **iOS + Android + PWA** stack with a fourth target. The native sidecar holds up to **5 concurrent GGUF contexts** (same cap as mobile/web), with load/unload via HTTP and `DefaultModelScheduler` admission in the renderer.
 
 | Platform | Shell | Inference path | Acceleration |
 |----------|-------|----------------|--------------|
@@ -211,7 +211,7 @@ User overrides in `{settingsDir}/settings.json`:
 |-------|-------|--------|
 | **1** | Sidecar CMake, desktop runtime modules, `DesktopProvider`, docs | ✅ This PR |
 | **2** | Pre-built binaries in `extraResources/`, electron-builder config export | ✅ |
-| **3** | SSE streaming from sidecar (`llama_completion_stream` + live SSE), ROCm gfx preflight (from vad-dt) | SSE ✅; ROCm preflight planned |
+| **3** | SSE streaming from sidecar, multi-model registry (5 contexts), memory admission, ROCm gfx preflight | SSE + multi-model ✅; ROCm preflight planned |
 | **4** | CI release workflow per-OS (tag builds) | Planned |
 
 ---

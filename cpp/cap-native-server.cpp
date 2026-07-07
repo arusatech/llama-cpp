@@ -11,8 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <memory>
-#include <mutex>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -38,12 +37,77 @@ namespace {
 std::mutex g_mu;
 std::unique_ptr<httplib::Server> g_srv;
 std::thread g_thr;
-std::atomic<int64_t> g_ctx{-1};
 std::atomic<bool> g_started{false};
+
+static constexpr int kMaxConcurrentModels = 5;
+
+struct ModelRegistry {
+    std::mutex                    mu;
+    std::map<std::string, int64_t> models;
+    std::map<std::string, std::string> paths;
+    int                           max_models = kMaxConcurrentModels;
+};
+
+ModelRegistry g_registry;
+
+std::string path_basename(const std::string & path) {
+    const size_t pos = path.find_last_of("/\\");
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+int64_t registry_resolve_ctx(const std::string & model_id) {
+    std::lock_guard<std::mutex> lock(g_registry.mu);
+    if (!model_id.empty()) {
+        const auto it = g_registry.models.find(model_id);
+        if (it != g_registry.models.end()) {
+            return it->second;
+        }
+        return -1;
+    }
+    if (g_registry.models.size() == 1) {
+        return g_registry.models.begin()->second;
+    }
+    return -1;
+}
+
+bool registry_unload_model(const std::string & model_id) {
+    std::lock_guard<std::mutex> lock(g_registry.mu);
+    const auto it = g_registry.models.find(model_id);
+    if (it == g_registry.models.end()) {
+        return false;
+    }
+    llama_release_context(it->second);
+    g_registry.models.erase(it);
+    g_registry.paths.erase(model_id);
+    return true;
+}
+
+void registry_release_all() {
+    std::lock_guard<std::mutex> lock(g_registry.mu);
+    for (const auto & kv : g_registry.models) {
+        llama_release_context(kv.second);
+    }
+    g_registry.models.clear();
+    g_registry.paths.clear();
+}
+
+json registry_status_json() {
+    std::lock_guard<std::mutex> lock(g_registry.mu);
+    json models = json::array();
+    for (const auto & kv : g_registry.models) {
+        const auto path_it = g_registry.paths.find(kv.first);
+        models.push_back(json{{"id", kv.first},
+                              {"context_id", kv.second},
+                              {"path", path_it != g_registry.paths.end() ? path_it->second : ""}});
+    }
+    return json{{"loaded_count", g_registry.models.size()},
+                {"max_models", g_registry.max_models},
+                {"loaded_models", models}};
+}
 
 void set_cors(httplib::Response & res) {
     res.set_header("Access-Control-Allow-Origin", "*");
-    res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
@@ -97,6 +161,45 @@ bool parse_openai_completion(const std::string & body, std::string & model_out, 
 
 json make_openai_error(const std::string & message, const std::string & type = "invalid_request_error") {
     return json{{"error", json{{"message", message}, {"type", type}}}};
+}
+
+bool registry_load_model(const std::string & model_id, const std::string & path, const json & params, json & err_out) {
+    if (model_id.empty() || path.empty()) {
+        err_out = make_openai_error("model_id and path are required");
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_registry.mu);
+    if (g_registry.models.count(model_id)) {
+        return true;
+    }
+    if (static_cast<int>(g_registry.models.size()) >= g_registry.max_models) {
+        err_out = make_openai_error("model limit reached (" + std::to_string(g_registry.max_models) + ")",
+                                    "model_limit_reached");
+        return false;
+    }
+    const std::string params_json = params.is_object() ? params.dump() : "{}";
+    const int64_t     ctx_id      = llama_init_context(path.c_str(), params_json.c_str());
+    if (ctx_id < 0) {
+        err_out = make_openai_error("failed to load model", "server_error");
+        return false;
+    }
+    g_registry.models[model_id] = ctx_id;
+    g_registry.paths[model_id]  = path;
+    return true;
+}
+
+bool registry_require_ctx(const std::string & model_id, httplib::Response & res, int64_t & ctx_out) {
+    ctx_out = registry_resolve_ctx(model_id);
+    if (ctx_out >= 0) {
+        return true;
+    }
+    set_cors(res);
+    res.status = 404;
+    const std::string msg =
+        model_id.empty() ? "no model loaded — call POST /v1/internal/models/load first"
+                         : "model not loaded: " + model_id;
+    res.set_content(make_openai_error(msg, "model_not_found").dump(), "application/json");
+    return false;
 }
 
 json openai_completion_response(const std::string & model, const std::string & text, int prompt_tokens, int completion_tokens,
@@ -403,10 +506,10 @@ void sse_finish_stream(const std::shared_ptr<LiveSseState> & state, const LiveSs
                                                           {"finish_reason", "stop"}}})}};
         line = std::string("data: ") + final_chunk.dump() + "\n\n";
     }
-    sse_enqueue(state, line);
-    sse_enqueue(state, "data: [DONE]\n\n");
     {
         std::lock_guard<std::mutex> lock(state->mu);
+        state->pending.push_back(line);
+        state->pending.push_back("data: [DONE]\n\n");
         state->producer_done = true;
     }
     state->cv.notify_one();
@@ -420,10 +523,10 @@ void attach_live_sse_provider(httplib::Response & res, const std::shared_ptr<Liv
         [state](size_t /*offset*/, httplib::DataSink & sink) {
             for (;;) {
                 std::deque<std::string> batch;
-                bool done = false;
+                bool                     done = false;
                 {
                     std::unique_lock<std::mutex> lock(state->mu);
-                    if (state->pending.empty() && !state->producer_done) {
+                    while (state->pending.empty() && !state->producer_done) {
                         state->cv.wait_for(lock, std::chrono::milliseconds(100));
                     }
                     batch.swap(state->pending);
@@ -434,18 +537,16 @@ void attach_live_sse_provider(httplib::Response & res, const std::shared_ptr<Liv
                         return false;
                     }
                 }
-                if (done && batch.empty()) {
-                    std::unique_lock<std::mutex> lock(state->mu);
+                if (done) {
+                    std::lock_guard<std::mutex> lock(state->mu);
                     if (state->pending.empty()) {
                         sink.done();
                         return false;
                     }
-                } else if (!batch.empty()) {
                     continue;
                 }
-                if (done) {
-                    sink.done();
-                    return false;
+                if (!batch.empty()) {
+                    continue;
                 }
                 return true;
             }
@@ -482,10 +583,10 @@ void start_live_completion_stream(int64_t ctx_id, const std::string & prompt, in
     }).detach();
 }
 
-void register_routes(httplib::Server & svr, int64_t ctx_id) {
+void register_routes(httplib::Server & svr) {
     svr.set_default_headers({{"Server", "llama-cpp-capacitor-native"},
                              {"Access-Control-Allow-Origin", "*"},
-                             {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
+                             {"Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"},
                              {"Access-Control-Allow-Headers", "Content-Type, Authorization"}});
 
     svr.Options(".*", [](const httplib::Request &, httplib::Response & res) {
@@ -496,23 +597,109 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
 
     svr.Get("/health", [](const httplib::Request &, httplib::Response & res) {
         set_cors(res);
-        res.set_content(json{{"status", "ok"}}.dump(), "application/json");
+        res.set_content(json{{"status", "ok"}, {"registry", registry_status_json()}}.dump(), "application/json");
     });
 
     svr.Get("/v1/health", [](const httplib::Request &, httplib::Response & res) {
         set_cors(res);
-        res.set_content(json{{"status", "ok"}}.dump(), "application/json");
+        res.set_content(json{{"status", "ok"}, {"registry", registry_status_json()}}.dump(), "application/json");
     });
 
-    svr.Get("/v1/models", [ctx_id](const httplib::Request &, httplib::Response & res) {
-        (void)ctx_id;
+    svr.Get("/v1/models", [](const httplib::Request &, httplib::Response & res) {
         set_cors(res);
         json data = json::array();
-        data.push_back(json{{"id", "local"}, {"object", "model"}, {"owned_by", "local"}});
+        {
+            std::lock_guard<std::mutex> lock(g_registry.mu);
+            for (const auto & kv : g_registry.models) {
+                data.push_back(json{{"id", kv.first}, {"object", "model"}, {"owned_by", "local"}});
+            }
+        }
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
-    auto chat_handler = [ctx_id](const httplib::Request & req, httplib::Response & res) {
+    svr.Get("/v1/internal/memory", [](const httplib::Request &, httplib::Response & res) {
+        set_cors(res);
+        res.set_content(registry_status_json().dump(), "application/json");
+    });
+
+    svr.Post("/v1/internal/context-limit", [](const httplib::Request & req, httplib::Response & res) {
+        set_cors(res);
+        try {
+            json b = json::parse(req.body);
+            int  limit = b.value("limit", kMaxConcurrentModels);
+            if (limit < 1) {
+                limit = 1;
+            }
+            if (limit > kMaxConcurrentModels) {
+                limit = kMaxConcurrentModels;
+            }
+            {
+                std::lock_guard<std::mutex> lock(g_registry.mu);
+                g_registry.max_models = limit;
+            }
+            res.set_content(json{{"ok", true}, {"limit", limit}}.dump(), "application/json");
+        } catch (...) {
+            res.status = 400;
+            res.set_content(make_openai_error("invalid JSON").dump(), "application/json");
+        }
+    });
+
+    svr.Post("/v1/internal/models/load", [](const httplib::Request & req, httplib::Response & res) {
+        set_cors(res);
+        try {
+            json b = json::parse(req.body);
+            std::string model_id = b.value("model_id", "");
+            std::string path     = b.value("path", "");
+            if (path.empty() && b.contains("model") && b["model"].is_string()) {
+                path = b["model"].get<std::string>();
+            }
+            if (model_id.empty() && !path.empty()) {
+                model_id = path_basename(path);
+            }
+            json params = json::object();
+            if (b.contains("n_ctx")) {
+                params["n_ctx"] = b["n_ctx"];
+            }
+            if (b.contains("n_gpu_layers")) {
+                params["n_gpu_layers"] = b["n_gpu_layers"];
+            }
+            if (b.contains("n_threads")) {
+                params["n_threads"] = b["n_threads"];
+            }
+            if (b.value("embedding", false)) {
+                params["embedding"] = true;
+            }
+            json err;
+            if (!registry_load_model(model_id, path, params, err)) {
+                res.status = err.contains("error") && err["error"].is_object()
+                                 && err["error"].value("type", "") == "model_limit_reached"
+                             ? 429
+                             : 400;
+                res.set_content(err.dump(), "application/json");
+                return;
+            }
+            res.set_content(json{{"ok", true}, {"model_id", model_id}, {"registry", registry_status_json()}}.dump(),
+                            "application/json");
+        } catch (...) {
+            res.status = 400;
+            res.set_content(make_openai_error("invalid JSON").dump(), "application/json");
+        }
+    });
+
+    svr.Delete(R"(/v1/internal/models/([^/]+))", [](const httplib::Request & req, httplib::Response & res) {
+        set_cors(res);
+        const std::string model_id = req.matches.size() > 1 ? req.matches[1].str() : "";
+        if (model_id.empty() || !registry_unload_model(model_id)) {
+            res.status = 404;
+            res.set_content(make_openai_error("model not loaded: " + model_id, "model_not_found").dump(),
+                            "application/json");
+            return;
+        }
+        res.set_content(json{{"ok", true}, {"model_id", model_id}, {"registry", registry_status_json()}}.dump(),
+                        "application/json");
+    });
+
+    auto chat_handler = [](const httplib::Request & req, httplib::Response & res) {
         set_cors(res);
         std::string model;
         json messages;
@@ -522,6 +709,10 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
         if (!parse_openai_chat(req.body, model, messages, max_tokens, temperature, stream)) {
             res.status = 400;
             res.set_content(make_openai_error("invalid JSON or missing messages").dump(), "application/json");
+            return;
+        }
+        int64_t ctx_id = -1;
+        if (!registry_require_ctx(model, res, ctx_id)) {
             return;
         }
         const std::string messages_str = messages.dump();
@@ -593,7 +784,7 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
     // Alias used by some clients and llama.cpp server.
     svr.Post("/chat/completions", chat_handler);
 
-    auto completion_handler = [ctx_id](const httplib::Request & req, httplib::Response & res) {
+    auto completion_handler = [](const httplib::Request & req, httplib::Response & res) {
         set_cors(res);
         std::string model;
         std::string prompt;
@@ -603,6 +794,10 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
         if (!parse_openai_completion(req.body, model, prompt, max_tokens, temperature, stream)) {
             res.status = 400;
             res.set_content(make_openai_error("invalid JSON or missing prompt").dump(), "application/json");
+            return;
+        }
+        int64_t ctx_id = -1;
+        if (!registry_require_ctx(model, res, ctx_id)) {
             return;
         }
 
@@ -636,7 +831,7 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
     svr.Post("/v1/completions", completion_handler);
     svr.Post("/completions", completion_handler);
 
-    auto responses_handler = [ctx_id](const httplib::Request & req, httplib::Response & res) {
+    auto responses_handler = [](const httplib::Request & req, httplib::Response & res) {
         set_cors(res);
         std::string model;
         std::string prompt;
@@ -646,6 +841,10 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
         if (!parse_openai_responses(req.body, model, prompt, max_tokens, temperature, stream)) {
             res.status = 400;
             res.set_content(make_openai_error("invalid JSON or missing input").dump(), "application/json");
+            return;
+        }
+        int64_t ctx_id = -1;
+        if (!registry_require_ctx(model, res, ctx_id)) {
             return;
         }
 
@@ -719,13 +918,17 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
     svr.Post("/v1/responses", responses_handler);
     svr.Post("/responses", responses_handler);
 
-    auto embeddings_handler = [ctx_id](const httplib::Request & req, httplib::Response & res) {
+    auto embeddings_handler = [](const httplib::Request & req, httplib::Response & res) {
         set_cors(res);
         std::string model;
         std::vector<std::string> inputs;
         if (!parse_embedding_request(req.body, model, inputs)) {
             res.status = 400;
             res.set_content(make_openai_error("invalid JSON or missing input").dump(), "application/json");
+            return;
+        }
+        int64_t ctx_id = -1;
+        if (!registry_require_ctx(model, res, ctx_id)) {
             return;
         }
 
@@ -766,7 +969,7 @@ void register_routes(httplib::Server & svr, int64_t ctx_id) {
 } // namespace
 
 int cap_llama_server_start(const char * model_path, const char * host, int port, const char * params_json) {
-    if (!model_path || !host) {
+    if (!host) {
         return 0;
     }
     std::lock_guard<std::mutex> lock(g_mu);
@@ -774,14 +977,17 @@ int cap_llama_server_start(const char * model_path, const char * host, int port,
         return 0;
     }
 
-    int64_t id = llama_init_context(model_path, params_json ? params_json : "");
-    if (id < 0) {
-        return 0;
+    json boot_params = json::object();
+    if (params_json && params_json[0] != '\0') {
+        try {
+            boot_params = json::parse(params_json);
+        } catch (...) {
+            boot_params = json::object();
+        }
     }
-    g_ctx.store(id);
 
     auto svr = std::make_unique<httplib::Server>();
-    register_routes(*svr, id);
+    register_routes(*svr);
 
     g_srv = std::move(svr);
     const std::string host_owned(host);
@@ -799,8 +1005,22 @@ int cap_llama_server_start(const char * model_path, const char * host, int port,
                 g_thr.join();
             }
             g_srv.reset();
-            llama_release_context(id);
-            g_ctx.store(-1);
+            return 0;
+        }
+    }
+
+    if (model_path && model_path[0] != '\0') {
+        std::string model_id = boot_params.value("model_id", path_basename(model_path));
+        json        err;
+        if (!registry_load_model(model_id, model_path, boot_params, err)) {
+            if (g_srv) {
+                g_srv->stop();
+            }
+            if (g_thr.joinable()) {
+                g_thr.join();
+            }
+            g_srv.reset();
+            registry_release_all();
             return 0;
         }
     }
@@ -812,13 +1032,11 @@ int cap_llama_server_start(const char * model_path, const char * host, int port,
 void cap_llama_server_stop(void) {
     std::unique_ptr<httplib::Server> srv;
     std::thread thr;
-    int64_t id = -1;
     {
         std::lock_guard<std::mutex> lock(g_mu);
         if (!g_started.load()) {
             return;
         }
-        id = g_ctx.load();
         srv = std::move(g_srv);
         thr = std::move(g_thr);
         g_started.store(false);
@@ -832,11 +1050,8 @@ void cap_llama_server_stop(void) {
     {
         std::lock_guard<std::mutex> lock(g_mu);
         g_srv.reset();
-        g_ctx.store(-1);
     }
-    if (id >= 0) {
-        llama_release_context(id);
-    }
+    registry_release_all();
 }
 
 int cap_llama_server_is_running(void) {
@@ -857,6 +1072,8 @@ int cap_llama_server_main(int argc, char ** argv) {
         std::string a = argv[i];
         if ((a == "-m" || a == "--model") && i + 1 < argc) {
             model = argv[++i];
+        } else if ((a == "--model-id") && i + 1 < argc) {
+            pj["model_id"] = argv[++i];
         } else if (a == "--host" && i + 1 < argc) {
             host = argv[++i];
         } else if (a == "--port" && i + 1 < argc) {
@@ -870,9 +1087,6 @@ int cap_llama_server_main(int argc, char ** argv) {
         } else if (a == "--no-gpu") {
             pj["n_gpu_layers"] = 0;
         }
-    }
-    if (!model) {
-        return 1;
     }
     std::string pj_str;
     if (pj.is_object() && !pj.empty()) {
