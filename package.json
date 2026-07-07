@@ -30,6 +30,9 @@
   },
   "unpkg": "dist/plugin.js",
   "files": [
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
     "android/src/main/",
     "android/build.gradle",
     "build-native.sh",
