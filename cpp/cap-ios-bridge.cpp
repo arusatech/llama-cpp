@@ -1705,12 +1705,12 @@ char * llama_bench(int64_t ctx_id, int32_t pp, int32_t tg, int32_t pl, int32_t n
     return r ? dup_c_string(r) : nullptr;
 }
 
-char * llama_load_session_file(int64_t ctx_id, const char * path) {
+char * llama_cap_load_session_file(int64_t ctx_id, const char * path) {
     const char * r = llama_cap_load_session(ctx_id, path);
     return r ? dup_c_string(r) : nullptr;
 }
 
-int32_t llama_save_session_file(int64_t ctx_id, const char * path, int32_t max_tokens) {
+int32_t llama_cap_save_session_file(int64_t ctx_id, const char * path, int32_t max_tokens) {
     const char * r = llama_cap_save_session(ctx_id, path, max_tokens);
     if (!r) return -1;
     try {

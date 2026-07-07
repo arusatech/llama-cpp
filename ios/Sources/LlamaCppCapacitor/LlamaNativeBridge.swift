@@ -160,9 +160,9 @@ enum LlamaNativeBridge {
     // MARK: - Session management
 
     static func loadSession(contextId: Int64, filepath: String) throws -> [String: Any] {
-        guard let fn: SingleArgJsonFn = trySymOpt("llama_load_session_file", SingleArgJsonFn.self),
+        guard let fn: SingleArgJsonFn = trySymOpt("llama_cap_load_session_file", SingleArgJsonFn.self),
               let free: FreeResultFn  = trySymOpt("llama_free_completion_result", FreeResultFn.self) else {
-            throw Failure.missingSymbol("llama_load_session_file")
+            throw Failure.missingSymbol("llama_cap_load_session_file")
         }
         let ptr = filepath.withCString { fn(contextId, $0) }
         guard let ptr else { throw Failure.operationFailed("loadSession returned nil for \(filepath)") }
@@ -171,8 +171,8 @@ enum LlamaNativeBridge {
     }
 
     static func saveSession(contextId: Int64, filepath: String, size: Int) throws -> Int {
-        guard let fn: SessionSaveFn = trySymOpt("llama_save_session_file", SessionSaveFn.self) else {
-            throw Failure.missingSymbol("llama_save_session_file")
+        guard let fn: SessionSaveFn = trySymOpt("llama_cap_save_session_file", SessionSaveFn.self) else {
+            throw Failure.missingSymbol("llama_cap_save_session_file")
         }
         let saved = filepath.withCString { fn(contextId, $0, Int32(size)) }
         return Int(saved)

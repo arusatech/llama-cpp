@@ -1,5 +1,5 @@
 import { registerPlugin } from '@capacitor/core';
-import type { LlamaCppPlugin, NativeLlamaContext, NativeCompletionResult } from './definitions';
+import type { LlamaCppPlugin, NativeLlamaContext, NativeCompletionResult, NativeTokenizeResult } from './definitions';
 import { WebProvider } from './isomorphic/provider.web';
 import { ensureModelInOpfs } from './storage/opfs.store';
 import { listManifestEntries } from './storage/manifest';
@@ -138,10 +138,10 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   async modelInfo({ path }: { path: string; skip?: string[] }): Promise<Object> {
     const entry = await listManifestEntries().then((es) => es.find((e) => e.modelId === path || e.path === path));
     return {
+      ...MODEL_DESC_STUB,
       path,
       desc: 'WASM model (web)',
       size: entry?.sizeBytes ?? 0,
-      ...MODEL_DESC_STUB,
     };
   }
 
@@ -287,7 +287,7 @@ export class LlamaCppWeb implements LlamaCppPlugin {
       truncated: false,
       stopped_eos: result.finish_reason === 'stop',
       stopped_word: '',
-      stopped_limit: result.finish_reason === 'length',
+      stopped_limit: result.finish_reason === 'length' ? 1 : 0,
       stopping_word: '',
       context_full: false,
       interrupted: result.finish_reason === 'error',
@@ -394,12 +394,18 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   }: {
     contextId: number;
     text: string;
-    [key: string]: unknown;
-  }): Promise<{ tokens: number[]; has_media: boolean }> {
+    imagePaths?: string[];
+  }): Promise<NativeTokenizeResult> {
     const modelId = this.contextToModel.get(contextId);
     if (!modelId) throw new Error('LlamaCppWeb: context not found');
     const result = await this.provider.tokenize(modelId, text);
-    return { tokens: result.tokens, has_media: result.has_media ?? false };
+    return {
+      tokens: result.tokens,
+      has_images: false,
+      bitmap_hashes: [],
+      chunk_pos: [],
+      chunk_pos_images: [],
+    };
   }
 
   async detokenize({
@@ -557,15 +563,16 @@ export class LlamaCppWeb implements LlamaCppPlugin {
 
   async getFormattedAudioCompletion({
     contextId,
-    speaker,
+    speakerJsonStr,
     textToSpeak,
   }: {
     contextId: number;
-    speaker: object | null;
+    speakerJsonStr: string;
     textToSpeak: string;
   }): Promise<{ prompt: string; grammar?: string }> {
     const modelId = this.contextToModel.get(contextId);
     if (!modelId) throw new Error('LlamaCppWeb: context not found');
+    const speaker = speakerJsonStr ? (JSON.parse(speakerJsonStr) as object) : null;
     return this.provider.getFormattedAudioCompletion(modelId, speaker, textToSpeak);
   }
 
@@ -725,16 +732,11 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   // -------------------------------------------------------------------------
   // Events
   // -------------------------------------------------------------------------
-  async addListener(eventName: string, listenerFunc: (data: unknown) => void): Promise<{ remove: () => void }> {
+  async addListener(eventName: string, listenerFunc: (data: unknown) => void): Promise<void> {
     if (!this.listeners.has(eventName)) {
       this.listeners.set(eventName, new Set());
     }
     this.listeners.get(eventName)!.add(listenerFunc);
-    return {
-      remove: () => {
-        this.listeners.get(eventName)?.delete(listenerFunc);
-      },
-    };
   }
 
   async removeAllListeners(): Promise<void> {

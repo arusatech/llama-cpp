@@ -24,6 +24,13 @@ export interface GenerateRequest {
   messages?: Array<{ role: string; content: string }>;
   max_tokens?: number;
   temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  repeat_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
+  grammar?: string;
   stream?: boolean;
 }
 

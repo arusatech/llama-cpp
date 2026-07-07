@@ -23,6 +23,7 @@
 
 #define LOG_TAG "LlamaCpp"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace jni_utils {
@@ -627,7 +628,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_completionNative(
         ctx->params.sampling.top_k    = (int)jni_utils::jsobject_opt_double(env, params, "top_k", 40);
         ctx->params.sampling.top_p    = (float)jni_utils::jsobject_opt_double(env, params, "top_p", 0.95);
         ctx->params.sampling.min_p    = (float)jni_utils::jsobject_opt_double(env, params, "min_p", 0.05);
-        ctx->params.sampling.typical_p = (float)jni_utils::jsobject_opt_double(env, params, "typical_p", 1.0);
+        ctx->params.sampling.typ_p      = (float)jni_utils::jsobject_opt_double(env, params, "typical_p", 1.0);
         ctx->params.sampling.penalty_repeat  = (float)jni_utils::jsobject_opt_double(env, params, "penalty_repeat", 1.1);
         ctx->params.sampling.penalty_freq    = (float)jni_utils::jsobject_opt_double(env, params, "penalty_freq", 0.0);
         ctx->params.sampling.penalty_present = (float)jni_utils::jsobject_opt_double(env, params, "penalty_present", 0.0);
@@ -1750,8 +1751,17 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_saveSessionNative(
 }
 
 // ---------------------------------------------------------------------------
+// Supplementary JNI translation units — included here so they share the same
+// contexts map, LOG macros, and jni_utils helpers defined above.
+// ---------------------------------------------------------------------------
+#include "jni-lora.cpp"
+#include "jni-chat-session.cpp"
+#include "jni-multimodal.cpp"
+#include "jni-tts.cpp"
+
+// ---------------------------------------------------------------------------
 // LoRA adapters — delegate to jni-lora.cpp implementations
-// Note: jni-lora.cpp is included via CMakeLists, its functions use the same
+// Note: jni-lora.cpp is included above, its functions use the same
 // `contexts` map defined in this translation unit.
 // The Java-side now declares native int applyLoraAdaptersNative(long, Object[]).
 // We bridge Object[] → jobjectArray here.
@@ -1792,5 +1802,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative(
 }
 
 } // extern "C" (LoRA forwarders)
+
+} // extern "C" (main block)
 
 } // namespace jni_utils

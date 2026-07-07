@@ -24,8 +24,10 @@ char    *llama_rerank_json(int64_t context_id, const char *query, const char *do
 char    *llama_bench(int64_t context_id, int32_t pp, int32_t tg, int32_t pl, int32_t nr);
 
 // Session management — returns JSON; free with llama_free_completion_result
-char    *llama_load_session_file(int64_t context_id, const char *filepath);
-int32_t  llama_save_session_file(int64_t context_id, const char *filepath, int32_t max_tokens);
+// NOTE: named llama_cap_* to avoid clashing with the deprecated bool-returning
+// llama_load_session_file / llama_save_session_file in llama.h (llama-context.cpp).
+char    *llama_cap_load_session_file(int64_t context_id, const char *filepath);
+int32_t  llama_cap_save_session_file(int64_t context_id, const char *filepath, int32_t max_tokens);
 
 // LoRA adapters
 int32_t  llama_apply_lora_adapters(int64_t context_id, const char *lora_adapters_json);
