@@ -1,6 +1,13 @@
 import Foundation
 import Capacitor
 
+// MARK: - Numeric clamping helper (used by decodeAudioTokens)
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        return min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
 // MARK: - Native Library Integration
 
 private enum LibraryLoader {
@@ -438,11 +445,16 @@ struct MinjaCaps {
             }
         }
         
-        // Return context info
+        // Query GPU info from native layer
+        let gpuInfo = LlamaNativeBridge.queryGpuInfo(nativeContextId)
+        let gpuEnabled = gpuInfo.gpu
+        let reasonNoGPU = gpuEnabled ? "" : (gpuInfo.reason.isEmpty ? "Metal not used" : gpuInfo.reason)
+
+        // Return context info — reflect actual GPU state
         let contextInfo: [String: Any] = [
             "contextId": contextId,
-            "gpu": false,
-            "reasonNoGPU": "Not implemented",
+            "gpu": gpuEnabled,
+            "reasonNoGPU": reasonNoGPU,
             "model": [
                 "desc": model.desc,
                 "size": model.size,
@@ -668,24 +680,41 @@ struct MinjaCaps {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically load session from file
-        let sessionResult: [String: Any] = [
-            "tokens_loaded": 0,
-            "prompt": ""
-        ]
-        
-        completion(.success(sessionResult))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.loadSession(contextId: nativeId, filepath: filepath)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("loadSession failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func saveSession(contextId: Int, filepath: String, size: Int, completion: @escaping (LlamaResult<Int>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically save session to file
-        completion(.success(0))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let saved = try LlamaNativeBridge.saveSession(contextId: nativeId, filepath: filepath, size: size)
+                completion(.success(saved))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("saveSession failed: \(error.localizedDescription)")))
+            }
+        }
     }
     
     // MARK: - Tokenization
@@ -786,225 +815,441 @@ struct MinjaCaps {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically perform reranking
-        let rerankResults: [[String: Any]] = []
-        completion(.success(rerankResults))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                guard let docsData = try? JSONSerialization.data(withJSONObject: documents),
+                      let docsJson = String(data: docsData, encoding: .utf8) else {
+                    completion(.failure(.operationFailed("Failed to serialize documents")))
+                    return
+                }
+                let results = try LlamaNativeBridge.runRerank(contextId: nativeId, query: query, documentsJson: docsJson)
+                completion(.success(results))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("rerank failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
-    // MARK: - Benchmarking
-    
+
     func bench(contextId: Int, pp: Int, tg: Int, pl: Int, nr: Int, completion: @escaping (LlamaResult<String>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically run benchmarks
-        let benchResult = "[]"
-        completion(.success(benchResult))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.runBench(contextId: nativeId, pp: pp, tg: tg, pl: pl, nr: nr)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("bench failed: \(error.localizedDescription)")))
+            }
+        }
     }
     
     // MARK: - LoRA adapters
-    
+
     func applyLoraAdapters(contextId: Int, loraAdapters: [[String: Any]], completion: @escaping (LlamaResult<Void>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically apply LoRA adapters
-        completion(.success(()))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: loraAdapters)
+            let json = String(data: data, encoding: .utf8) ?? "[]"
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    _ = try LlamaNativeBridge.applyLoraAdapters(contextId: nativeId, loraAdaptersJson: json)
+                    completion(.success(()))
+                } catch let err as LlamaNativeBridge.Failure {
+                    completion(.failure(.operationFailed(err.localizedDescription)))
+                } catch {
+                    completion(.failure(.operationFailed("applyLoraAdapters failed: \(error.localizedDescription)")))
+                }
+            }
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize LoRA adapters: \(error.localizedDescription)")))
+        }
     }
-    
+
     func removeLoraAdapters(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically remove LoRA adapters
-        completion(.success(()))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try LlamaNativeBridge.removeLoraAdapters(contextId: nativeId)
+                completion(.success(()))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("removeLoraAdapters failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func getLoadedLoraAdapters(contextId: Int, completion: @escaping (LlamaResult<[[String: Any]]>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        // This would typically return loaded LoRA adapters
-        let adapters: [[String: Any]] = []
-        completion(.success(adapters))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let adapters = try LlamaNativeBridge.getLoadedLoraAdapters(contextId: nativeId)
+                completion(.success(adapters))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getLoadedLoraAdapters failed: \(error.localizedDescription)")))
+            }
+        }
     }
     
     // MARK: - Multimodal methods
-    
+
     func initMultimodal(contextId: Int, path: String, useGpu: Bool, completion: @escaping (LlamaResult<Bool>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        context.isMultimodalEnabled = true
-        completion(.success(true))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let ok = try LlamaNativeBridge.initMultimodal(contextId: nativeId, mmProjPath: path, useGpu: useGpu)
+                if ok { context.isMultimodalEnabled = true }
+                completion(.success(ok))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("initMultimodal failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func isMultimodalEnabled(contextId: Int, completion: @escaping (LlamaResult<Bool>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        completion(.success(context.isMultimodalEnabled))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(context.isMultimodalEnabled))
+            return
+        }
+        let enabled = LlamaNativeBridge.isMultimodalEnabled(contextId: nativeId)
+        context.isMultimodalEnabled = enabled
+        completion(.success(enabled))
     }
-    
+
     func getMultimodalSupport(contextId: Int, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        let support: [String: Any] = [
-            "vision": true,
-            "audio": true
-        ]
-        
-        completion(.success(support))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(["vision": false, "audio": false]))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let support = try LlamaNativeBridge.getMultimodalSupport(contextId: nativeId)
+                completion(.success(support))
+            } catch {
+                completion(.success(["vision": false, "audio": false]))
+            }
+        }
     }
-    
+
     func releaseMultimodal(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
+        guard let nativeId = contextIdToNative[contextId] else {
+            context.isMultimodalEnabled = false
+            completion(.success(()))
+            return
+        }
+        LlamaNativeBridge.releaseMultimodal(contextId: nativeId)
         context.isMultimodalEnabled = false
         completion(.success(()))
     }
     
     // MARK: - TTS methods
-    
+
     func initVocoder(contextId: Int, path: String, nBatch: Int?, completion: @escaping (LlamaResult<Bool>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        context.isVocoderEnabled = true
-        completion(.success(true))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        let batchSize = nBatch ?? 512
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let ok = try LlamaNativeBridge.initVocoder(contextId: nativeId, path: path, nBatch: batchSize)
+                if ok { context.isVocoderEnabled = true }
+                completion(.success(ok))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("initVocoder failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func isVocoderEnabled(contextId: Int, completion: @escaping (LlamaResult<Bool>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        completion(.success(context.isVocoderEnabled))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(context.isVocoderEnabled))
+            return
+        }
+        let enabled = LlamaNativeBridge.isVocoderEnabled(contextId: nativeId)
+        context.isVocoderEnabled = enabled
+        completion(.success(enabled))
     }
-    
+
     func getFormattedAudioCompletion(contextId: Int, speakerJsonStr: String, textToSpeak: String, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        let audioCompletion: [String: Any] = [
-            "prompt": "",
-            "grammar": NSNull()
-        ]
-        
-        completion(.success(audioCompletion))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.getFormattedAudioCompletion(
+                    contextId: nativeId, speakerJson: speakerJsonStr, text: textToSpeak)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getFormattedAudioCompletion failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func getAudioCompletionGuideTokens(contextId: Int, textToSpeak: String, completion: @escaping (LlamaResult<[Int]>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        let tokens: [Int] = []
-        completion(.success(tokens))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let tokens = try LlamaNativeBridge.getAudioCompletionGuideTokens(contextId: nativeId, text: textToSpeak)
+                completion(.success(tokens))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getAudioCompletionGuideTokens failed: \(error.localizedDescription)")))
+            }
+        }
     }
-    
+
     func decodeAudioTokens(contextId: Int, tokens: [Int], completion: @escaping (LlamaResult<[Int]>) -> Void) {
         guard contexts[contextId] != nil else {
             completion(.failure(.contextNotFound))
             return
         }
-        
-        let decodedTokens: [Int] = []
-        completion(.success(decodedTokens))
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: tokens)
+            let json = String(data: data, encoding: .utf8) ?? "[]"
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let floatSamples = try LlamaNativeBridge.decodeAudioTokens(contextId: nativeId, tokensJson: json)
+                    // Convert float PCM [-1,1] to Int16 range for interop
+                    let intSamples = floatSamples.map { Int(($0 * 32767.0).clamped(to: -32768...32767)) }
+                    completion(.success(intSamples))
+                } catch let err as LlamaNativeBridge.Failure {
+                    completion(.failure(.operationFailed(err.localizedDescription)))
+                } catch {
+                    completion(.failure(.operationFailed("decodeAudioTokens failed: \(error.localizedDescription)")))
+                }
+            }
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize tokens: \(error.localizedDescription)")))
+        }
     }
-    
+
     func releaseVocoder(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
         guard let context = contexts[contextId] else {
             completion(.failure(.contextNotFound))
             return
         }
-        
+        guard let nativeId = contextIdToNative[contextId] else {
+            context.isVocoderEnabled = false
+            completion(.success(()))
+            return
+        }
+        LlamaNativeBridge.releaseVocoder(contextId: nativeId)
         context.isVocoderEnabled = false
         completion(.success(()))
     }
     
     // MARK: - Model download and management
-    
+    //
+    // Active downloads keyed by URL string. URLSession-based to support real progress
+    // and cancellation — replaces the old blocking Data(contentsOf:) implementation.
+
+    private var activeDownloads: [String: ActiveDownload] = [:]
+
+    private class ActiveDownload: NSObject, URLSessionDownloadDelegate {
+        let url: String
+        let localPath: String
+        var downloadedBytes: Int64 = 0
+        var totalBytes: Int64 = 0
+        var completed: Bool = false
+        var failed: Bool = false
+        var errorMessage: String?
+        var session: URLSession?
+        var task: URLSessionDownloadTask?
+        var onProgress: ((Int64, Int64) -> Void)?
+        var onDone: ((String?) -> Void)?
+
+        init(url: String, localPath: String) {
+            self.url = url
+            self.localPath = localPath
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64,
+                        totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+            downloadedBytes = totalBytesWritten
+            totalBytes = totalBytesExpectedToWrite
+            onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {
+            do {
+                let dest = URL(fileURLWithPath: localPath)
+                if FileManager.default.fileExists(atPath: localPath) {
+                    try FileManager.default.removeItem(at: dest)
+                }
+                try FileManager.default.moveItem(at: location, to: dest)
+                completed = true
+                onDone?(nil)
+            } catch {
+                failed = true
+                errorMessage = error.localizedDescription
+                onDone?(error.localizedDescription)
+            }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            if let error = error, !completed {
+                failed = true
+                errorMessage = error.localizedDescription
+                onDone?(error.localizedDescription)
+            }
+        }
+    }
+
     func downloadModel(url: String, filename: String, completion: @escaping (LlamaResult<String>) -> Void) {
-        // Get the documents directory
-        let fileManager = FileManager.default
-        guard let documentsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            completion(.failure(.operationFailed("Could not access documents directory")))
+        guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            completion(.failure(.operationFailed("Cannot access documents directory")))
             return
         }
-        
         let localPath = documentsDir.appendingPathComponent(filename).path
-        
-        // Check if file already exists
-        if fileManager.fileExists(atPath: localPath) {
+        // Return cached file immediately
+        if FileManager.default.fileExists(atPath: localPath) {
             completion(.success(localPath))
             return
         }
-        
-        // Download the file asynchronously
-        DispatchQueue.global(qos: .background).async {
-            guard let downloadURL = URL(string: url) else {
-                DispatchQueue.main.async {
-                    completion(.failure(.operationFailed("Invalid URL")))
-                }
-                return
-            }
-            
-            do {
-                let data = try Data(contentsOf: downloadURL)
-                try data.write(to: URL(fileURLWithPath: localPath))
-                
-                DispatchQueue.main.async {
-                    completion(.success(localPath))
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    completion(.failure(.operationFailed("Download failed: \(error.localizedDescription)")))
-                }
+        guard let downloadURL = URL(string: url) else {
+            completion(.failure(.operationFailed("Invalid URL: \(url)")))
+            return
+        }
+        let dl = ActiveDownload(url: url, localPath: localPath)
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: dl, delegateQueue: nil)
+        dl.session = session
+        dl.onDone = { [weak self] errorMsg in
+            self?.activeDownloads.removeValue(forKey: url)
+            if let msg = errorMsg {
+                // Don't call completion again; the path was already returned
+                print("[LlamaCpp] Download failed for \(url): \(msg)")
             }
         }
+        activeDownloads[url] = dl
+        let task = session.downloadTask(with: downloadURL)
+        dl.task = task
+        task.resume()
+        // Return the path immediately; caller polls getDownloadProgress
+        completion(.success(localPath))
     }
-    
+
     func getDownloadProgress(url: String, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
-        // For now, return a placeholder progress
-        // In a real implementation, this would track download progress
-        let progress: [String: Any] = [
-            "url": url,
-            "downloaded": 0,
-            "total": 0,
-            "percentage": 0.0
+        guard let dl = activeDownloads[url] else {
+            // Check if the file exists (completed in a previous session)
+            let result: [String: Any] = [
+                "progress": 0, "completed": false, "failed": false,
+                "downloadedBytes": 0, "totalBytes": 0
+            ]
+            completion(.success(result))
+            return
+        }
+        let progress: Double = dl.totalBytes > 0 ? Double(dl.downloadedBytes) / Double(dl.totalBytes) : 0
+        let result: [String: Any] = [
+            "progress": progress,
+            "completed": dl.completed,
+            "failed": dl.failed,
+            "errorMessage": dl.errorMessage ?? "",
+            "localPath": dl.localPath,
+            "downloadedBytes": dl.downloadedBytes,
+            "totalBytes": dl.totalBytes
         ]
-        completion(.success(progress))
+        completion(.success(result))
     }
-    
+
     func cancelDownload(url: String, completion: @escaping (LlamaResult<Bool>) -> Void) {
-        // For now, return success
-        // In a real implementation, this would cancel the ongoing download
+        guard let dl = activeDownloads[url] else {
+            completion(.success(false))
+            return
+        }
+        dl.task?.cancel()
+        dl.session?.invalidateAndCancel()
+        activeDownloads.removeValue(forKey: url)
         completion(.success(true))
     }
     

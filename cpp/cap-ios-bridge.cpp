@@ -1688,3 +1688,123 @@ char * llama_run_embedding_json(int64_t context_id, const char * text, const cha
 }
 
 } // extern "C"
+
+// ---------------------------------------------------------------------------
+// Public ABI aliases — the Swift LlamaNativeBridge looks up these exact symbols
+// via dlsym. They forward to the internal implementations above.
+// ---------------------------------------------------------------------------
+extern "C" {
+
+char * llama_rerank_json(int64_t ctx_id, const char * query, const char * docs) {
+    const char * r = llama_cap_rerank(ctx_id, query, docs);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+char * llama_bench(int64_t ctx_id, int32_t pp, int32_t tg, int32_t pl, int32_t nr) {
+    const char * r = llama_cap_bench(ctx_id, pp, tg, pl, nr);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+char * llama_load_session_file(int64_t ctx_id, const char * path) {
+    const char * r = llama_cap_load_session(ctx_id, path);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+int32_t llama_save_session_file(int64_t ctx_id, const char * path, int32_t max_tokens) {
+    const char * r = llama_cap_save_session(ctx_id, path, max_tokens);
+    if (!r) return -1;
+    try {
+        json j = json::parse(r);
+        return j.value("tokens_saved", -1);
+    } catch (...) { return -1; }
+}
+
+int32_t llama_apply_lora_adapters(int64_t ctx_id, const char * json_arr) {
+    const char * r = llama_cap_apply_lora(ctx_id, json_arr);
+    return (r && std::string(r).find("error") == std::string::npos) ? 0 : -1;
+}
+
+void llama_remove_lora_adapters(int64_t ctx_id) {
+    llama_cap_remove_lora(ctx_id);
+}
+
+char * llama_get_loaded_lora_adapters(int64_t ctx_id, const char * /*unused*/) {
+    const char * r = llama_cap_get_lora(ctx_id);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+int32_t llama_init_multimodal(int64_t ctx_id, const char * path, int32_t use_gpu) {
+    const char * r = llama_cap_init_multimodal(ctx_id, path, use_gpu);
+    if (!r) return 0;
+    try { return json::parse(r).value("ok", false) ? 1 : 0; } catch (...) { return 0; }
+}
+
+int32_t llama_is_multimodal_enabled(int64_t ctx_id) {
+    const char * r = llama_cap_multimodal_status(ctx_id);
+    if (!r) return 0;
+    try { return json::parse(r).value("enabled", false) ? 1 : 0; } catch (...) { return 0; }
+}
+
+char * llama_get_multimodal_support(int64_t ctx_id, const char * /*unused*/) {
+    const char * r = llama_cap_multimodal_status(ctx_id);
+    if (!r) return dup_c_string("{\"vision\":false,\"audio\":false}");
+    // Reformat to match expected {vision, audio} shape
+    try {
+        auto j = json::parse(r);
+        json out = {{"vision", j.value("vision", false)}, {"audio", j.value("audio", false)}};
+        return dup_c_string(out.dump());
+    } catch (...) {
+        return dup_c_string("{\"vision\":false,\"audio\":false}");
+    }
+}
+
+void llama_release_multimodal(int64_t ctx_id) {
+    llama_cap_release_multimodal(ctx_id);
+}
+
+int32_t llama_init_vocoder(int64_t ctx_id, const char * path, int32_t n_batch) {
+    const char * r = llama_cap_init_vocoder(ctx_id, path, n_batch);
+    if (!r) return 0;
+    try { return json::parse(r).value("ok", false) ? 1 : 0; } catch (...) { return 0; }
+}
+
+int32_t llama_is_vocoder_enabled(int64_t ctx_id) {
+    const char * r = llama_cap_vocoder_enabled(ctx_id);
+    if (!r) return 0;
+    try { return json::parse(r).value("enabled", false) ? 1 : 0; } catch (...) { return 0; }
+}
+
+char * llama_get_formatted_audio_completion(int64_t ctx_id, const char * speaker, const char * text) {
+    const char * r = llama_cap_formatted_audio_completion(ctx_id, speaker, text);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+char * llama_get_audio_completion_guide_tokens(int64_t ctx_id, const char * text) {
+    const char * r = llama_cap_audio_guide_tokens(ctx_id, text);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+char * llama_decode_audio_tokens(int64_t ctx_id, const char * tokens_json) {
+    const char * r = llama_cap_decode_audio_tokens(ctx_id, tokens_json);
+    return r ? dup_c_string(r) : nullptr;
+}
+
+void llama_release_vocoder(int64_t ctx_id) {
+    llama_cap_release_vocoder(ctx_id);
+}
+
+char * llama_get_context_gpu_info(int64_t ctx_id, const char * /*unused*/) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto * ctx = get_ctx(ctx_id);
+    if (!ctx) {
+        return dup_c_string("{\"gpu\":false,\"reasonNoGPU\":\"Context not found\"}");
+    }
+    // n_gpu_layers > 0 means GPU was requested; if the model loaded it means Metal ran
+    bool gpu = ctx->params.n_gpu_layers > 0;
+    std::string reason = gpu ? "" : (ctx->params.n_gpu_layers == 0
+        ? "n_gpu_layers=0 (CPU-only)" : "GPU layers requested but not active");
+    json out = {{"gpu", gpu}, {"reasonNoGPU", reason}};
+    return dup_c_string(out.dump());
+}
+
+} // extern "C" (public ABI aliases)

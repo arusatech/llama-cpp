@@ -269,21 +269,47 @@ public class LlamaCpp {
     private native void stopCompletionNative(long contextId);
     private native String getFormattedChatNative(long contextId, String messages, String chatTemplate);
     private native boolean toggleNativeLogNative(boolean enabled);
-    
-    // Model download and management methods
+
     // Tokenization methods
     private native Map<String, Object> tokenizeNative(long contextId, String text, String[] imagePaths);
     private native String detokenizeNative(long contextId, int[] tokens);
-    
-    // Embedding methods
+
+    // Embedding and reranking methods
     private native Map<String, Object> embeddingNative(long contextId, String text, JSObject params);
-    
+    private native List<Map<String, Object>> rerankNative(long contextId, String query, String[] documents, JSObject params);
+
+    // Benchmarking
+    private native String benchNative(long contextId, int pp, int tg, int pl, int nr);
+
+    // Session management
+    private native Map<String, Object> loadSessionNative(long contextId, String filepath);
+    private native int saveSessionNative(long contextId, String filepath, int size);
+
+    // LoRA adapter methods
+    private native int applyLoraAdaptersNative(long contextId, Object[] loraAdapters);
+    private native void removeLoraAdaptersNative(long contextId);
+    private native List<Map<String, Object>> getLoadedLoraAdaptersNative(long contextId);
+
+    // Multimodal methods
+    private native boolean initMultimodalNative(long contextId, String mmProjPath, boolean useGpu);
+    private native boolean isMultimodalEnabledNative(long contextId);
+    private native Map<String, Object> getMultimodalSupportNative(long contextId);
+    private native void releaseMultimodalNative(long contextId);
+
+    // TTS / Vocoder methods
+    private native boolean initVocoderNative(long contextId, String vocoderModelPath, int nBatch);
+    private native boolean isVocoderEnabledNative(long contextId);
+    private native Map<String, Object> getFormattedAudioCompletionNative(long contextId, String speakerJsonStr, String textToSpeak);
+    private native List<Integer> getAudioCompletionGuideTokensNative(long contextId, String textToSpeak);
+    private native List<Float> decodeAudioTokensNative(long contextId, int[] tokens);
+    private native void releaseVocoderNative(long contextId);
+
     // Model download and management methods
     private native String downloadModelNative(String url, String filename);
     private native Map<String, Object> getDownloadProgressNative(String url);
     private native boolean cancelDownloadNative(String url);
     private native List<Map<String, Object>> getAvailableModelsNative();
-    
+
     // Grammar utilities
     private native String convertJsonSchemaToGrammarNative(String schemaJson);
 
@@ -588,19 +614,61 @@ public class LlamaCpp {
             context.setNativeContextId(nativeContextId);
             contexts.put(contextId, context);
 
-            // Return context info
-            Map<String, Object> contextInfo = new HashMap<>();
-            contextInfo.put("contextId", contextId);
-            contextInfo.put("gpu", false);
-            contextInfo.put("reasonNoGPU", "Currently not supported");
+            // Query actual model metadata from native layer
+            Map<String, Object> modelInfoMap = modelInfoNative(modelPath);
+            String modelDesc = "Loaded model";
+            long modelSize = 0;
+            int nEmbd = 0;
+            int nParams = 0;
+            boolean gpuEnabled = false;
+            String reasonNoGPU = "GPU not requested";
+            if (modelInfoMap != null) {
+                Object d = modelInfoMap.get("desc");
+                if (d instanceof String) modelDesc = (String) d;
+                Object s = modelInfoMap.get("size");
+                if (s instanceof Number) modelSize = ((Number) s).longValue();
+                Object e = modelInfoMap.get("nEmbd");
+                if (e instanceof Number) nEmbd = ((Number) e).intValue();
+                Object np = modelInfoMap.get("nParams");
+                if (np instanceof Number) nParams = ((Number) np).intValue();
+                Object g = modelInfoMap.get("gpu");
+                if (g instanceof Boolean) gpuEnabled = (Boolean) g;
+                Object rng = modelInfoMap.get("reasonNoGPU");
+                if (rng instanceof String) reasonNoGPU = (String) rng;
+            }
+            // Reflect whether n_gpu_layers > 0 was requested
+            int requestedGpuLayers = 0;
+            try { requestedGpuLayers = params.getInteger("n_gpu_layers", 0); } catch (Exception ignored) {}
+            if (requestedGpuLayers > 0 && !gpuEnabled) {
+                reasonNoGPU = "Vulkan/GPU backend not available on this device";
+            } else if (requestedGpuLayers == 0) {
+                reasonNoGPU = "n_gpu_layers=0 (CPU-only)";
+            }
 
             Map<String, Object> modelInfo = new HashMap<>();
-            modelInfo.put("desc", "Loaded model");
-            modelInfo.put("size", 0);
-            modelInfo.put("nEmbd", 0);
-            modelInfo.put("nParams", 0);
+            modelInfo.put("desc", modelDesc);
+            modelInfo.put("size", modelSize);
+            modelInfo.put("nEmbd", nEmbd);
+            modelInfo.put("nParams", nParams);
             modelInfo.put("path", modelPath);
+            Map<String, Object> defaultCaps = new HashMap<>();
+            defaultCaps.put("tools", true); defaultCaps.put("toolCalls", true);
+            defaultCaps.put("toolResponses", true); defaultCaps.put("systemRole", true);
+            defaultCaps.put("parallelToolCalls", true); defaultCaps.put("toolCallId", true);
+            Map<String, Object> minja = new HashMap<>();
+            minja.put("default", true); minja.put("defaultCaps", defaultCaps);
+            minja.put("toolUse", true); minja.put("toolUseCaps", defaultCaps);
+            Map<String, Object> chatTemplates = new HashMap<>();
+            chatTemplates.put("llamaChat", true);
+            chatTemplates.put("minja", minja);
+            modelInfo.put("chatTemplates", chatTemplates);
+            modelInfo.put("metadata", new HashMap<>());
+            modelInfo.put("isChatTemplateSupported", true);
 
+            Map<String, Object> contextInfo = new HashMap<>();
+            contextInfo.put("contextId", contextId);
+            contextInfo.put("gpu", gpuEnabled);
+            contextInfo.put("reasonNoGPU", reasonNoGPU);
             contextInfo.put("model", modelInfo);
             contextInfo.put("androidLib", "llama-cpp");
 
@@ -865,27 +933,37 @@ public class LlamaCpp {
     // MARK: - Session management
 
     public void loadSession(int contextId, String filepath, LlamaCallback<Map<String, Object>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // This would typically load session from file
-        Map<String, Object> sessionResult = new HashMap<>();
-        sessionResult.put("tokens_loaded", 0);
-        sessionResult.put("prompt", "");
-
-        callback.onResult(LlamaResult.success(sessionResult));
+        try {
+            Map<String, Object> result = loadSessionNative(context.getNativeContextId(), filepath);
+            if (result != null) {
+                callback.onResult(LlamaResult.success(result));
+            } else {
+                callback.onResult(LlamaResult.failure(new LlamaError("loadSession returned null")));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "loadSession failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("loadSession failed: " + e.getMessage())));
+        }
     }
 
     public void saveSession(int contextId, String filepath, int size, LlamaCallback<Integer> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // This would typically save session to file
-        callback.onResult(LlamaResult.success(0));
+        try {
+            int tokensSaved = saveSessionNative(context.getNativeContextId(), filepath, size);
+            callback.onResult(LlamaResult.success(tokensSaved));
+        } catch (Exception e) {
+            Log.e(TAG, "saveSession failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("saveSession failed: " + e.getMessage())));
+        }
     }
 
     // MARK: - Tokenization
@@ -971,69 +1049,92 @@ public class LlamaCpp {
     }
 
     public void rerank(int contextId, String query, String[] documents, JSObject params, LlamaCallback<List<Map<String, Object>>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // Fixed: Use List instead of array for proper JSON serialization
-        List<Map<String, Object>> rerankResults = new ArrayList<>();
-        
-        // Generate mock rerank results
-        for (int i = 0; i < documents.length; i++) {
-            Map<String, Object> result = new HashMap<>();
-            result.put("score", Math.random());
-            result.put("index", i);
-            rerankResults.add(result);
+        try {
+            List<Map<String, Object>> results = rerankNative(context.getNativeContextId(), query, documents, params);
+            if (results != null) {
+                callback.onResult(LlamaResult.success(results));
+            } else {
+                callback.onResult(LlamaResult.failure(new LlamaError("rerank returned null")));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "rerank failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("rerank failed: " + e.getMessage())));
         }
-        
-        callback.onResult(LlamaResult.success(rerankResults));
     }
 
     // MARK: - Benchmarking
 
     public void bench(int contextId, int pp, int tg, int pl, int nr, LlamaCallback<String> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // This would typically run benchmarks
-        String benchResult = "[]";
-        callback.onResult(LlamaResult.success(benchResult));
+        try {
+            String result = benchNative(context.getNativeContextId(), pp, tg, pl, nr);
+            callback.onResult(LlamaResult.success(result != null ? result : "[]"));
+        } catch (Exception e) {
+            Log.e(TAG, "bench failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("bench failed: " + e.getMessage())));
+        }
     }
 
     // MARK: - LoRA adapters
 
     public void applyLoraAdapters(int contextId, List<Map<String, Object>> loraAdapters, LlamaCallback<Void> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // This would typically apply LoRA adapters
-        callback.onResult(LlamaResult.success(null));
+        try {
+            // Convert List<Map> to Object[] of HashMap for JNI (jni-lora.cpp expects HashMap[])
+            Object[] adaptersArray = new Object[loraAdapters.size()];
+            for (int i = 0; i < loraAdapters.size(); i++) {
+                java.util.HashMap<String, Object> map = new java.util.HashMap<>(loraAdapters.get(i));
+                adaptersArray[i] = map;
+            }
+            applyLoraAdaptersNative(context.getNativeContextId(), adaptersArray);
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            Log.e(TAG, "applyLoraAdapters failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("applyLoraAdapters failed: " + e.getMessage())));
+        }
     }
 
     public void removeLoraAdapters(int contextId, LlamaCallback<Void> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // This would typically remove LoRA adapters
-        callback.onResult(LlamaResult.success(null));
+        try {
+            removeLoraAdaptersNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            Log.e(TAG, "removeLoraAdapters failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("removeLoraAdapters failed: " + e.getMessage())));
+        }
     }
 
     public void getLoadedLoraAdapters(int contextId, LlamaCallback<List<Map<String, Object>>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // Fixed: Use List instead of array for proper JSON serialization
-        List<Map<String, Object>> adapters = new ArrayList<>();
-        callback.onResult(LlamaResult.success(adapters));
+        try {
+            List<Map<String, Object>> adapters = getLoadedLoraAdaptersNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(adapters != null ? adapters : new ArrayList<>()));
+        } catch (Exception e) {
+            Log.e(TAG, "getLoadedLoraAdapters failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("getLoadedLoraAdapters failed: " + e.getMessage())));
+        }
     }
 
     // MARK: - Multimodal methods
@@ -1044,9 +1145,14 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        context.setMultimodalEnabled(true);
-        callback.onResult(LlamaResult.success(true));
+        try {
+            boolean result = initMultimodalNative(context.getNativeContextId(), path, useGpu);
+            if (result) context.setMultimodalEnabled(true);
+            callback.onResult(LlamaResult.success(result));
+        } catch (Exception e) {
+            Log.e(TAG, "initMultimodal failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("initMultimodal failed: " + e.getMessage())));
+        }
     }
 
     public void isMultimodalEnabled(int contextId, LlamaCallback<Boolean> callback) {
@@ -1055,21 +1161,27 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        callback.onResult(LlamaResult.success(context.isMultimodalEnabled()));
+        try {
+            boolean enabled = isMultimodalEnabledNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(enabled));
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.success(context.isMultimodalEnabled()));
+        }
     }
 
     public void getMultimodalSupport(int contextId, LlamaCallback<Map<String, Object>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        Map<String, Object> support = new HashMap<>();
-        support.put("vision", true);
-        support.put("audio", true);
-
-        callback.onResult(LlamaResult.success(support));
+        try {
+            Map<String, Object> support = getMultimodalSupportNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(support != null ? support : new HashMap<>()));
+        } catch (Exception e) {
+            Log.e(TAG, "getMultimodalSupport failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("getMultimodalSupport failed: " + e.getMessage())));
+        }
     }
 
     public void releaseMultimodal(int contextId, LlamaCallback<Void> callback) {
@@ -1078,9 +1190,14 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        context.setMultimodalEnabled(false);
-        callback.onResult(LlamaResult.success(null));
+        try {
+            releaseMultimodalNative(context.getNativeContextId());
+            context.setMultimodalEnabled(false);
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            Log.e(TAG, "releaseMultimodal failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("releaseMultimodal failed: " + e.getMessage())));
+        }
     }
 
     // MARK: - TTS methods
@@ -1091,9 +1208,15 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        context.setVocoderEnabled(true);
-        callback.onResult(LlamaResult.success(true));
+        try {
+            int batchSize = (nBatch != null && nBatch > 0) ? nBatch : 512;
+            boolean result = initVocoderNative(context.getNativeContextId(), path, batchSize);
+            if (result) context.setVocoderEnabled(true);
+            callback.onResult(LlamaResult.success(result));
+        } catch (Exception e) {
+            Log.e(TAG, "initVocoder failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("initVocoder failed: " + e.getMessage())));
+        }
     }
 
     public void isVocoderEnabled(int contextId, LlamaCallback<Boolean> callback) {
@@ -1102,43 +1225,68 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        callback.onResult(LlamaResult.success(context.isVocoderEnabled()));
+        try {
+            boolean enabled = isVocoderEnabledNative(context.getNativeContextId());
+            callback.onResult(LlamaResult.success(enabled));
+        } catch (Exception e) {
+            callback.onResult(LlamaResult.success(context.isVocoderEnabled()));
+        }
     }
 
     public void getFormattedAudioCompletion(int contextId, String speakerJsonStr, String textToSpeak, LlamaCallback<Map<String, Object>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        Map<String, Object> audioCompletion = new HashMap<>();
-        audioCompletion.put("prompt", "");
-        audioCompletion.put("grammar", null);
-
-        callback.onResult(LlamaResult.success(audioCompletion));
+        try {
+            Map<String, Object> result = getFormattedAudioCompletionNative(
+                    context.getNativeContextId(), speakerJsonStr, textToSpeak);
+            callback.onResult(LlamaResult.success(result != null ? result : new HashMap<>()));
+        } catch (Exception e) {
+            Log.e(TAG, "getFormattedAudioCompletion failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("getFormattedAudioCompletion failed: " + e.getMessage())));
+        }
     }
 
     public void getAudioCompletionGuideTokens(int contextId, String textToSpeak, LlamaCallback<List<Integer>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // Fixed: Use List instead of array for proper JSON serialization
-        List<Integer> tokens = new ArrayList<>();
-        callback.onResult(LlamaResult.success(tokens));
+        try {
+            List<Integer> tokens = getAudioCompletionGuideTokensNative(
+                    context.getNativeContextId(), textToSpeak);
+            callback.onResult(LlamaResult.success(tokens != null ? tokens : new ArrayList<>()));
+        } catch (Exception e) {
+            Log.e(TAG, "getAudioCompletionGuideTokens failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("getAudioCompletionGuideTokens failed: " + e.getMessage())));
+        }
     }
 
     public void decodeAudioTokens(int contextId, Integer[] tokens, LlamaCallback<List<Integer>> callback) {
-        if (contexts.get(contextId) == null) {
+        LlamaContext context = contexts.get(contextId);
+        if (context == null) {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        // Fixed: Use List instead of array for proper JSON serialization
-        List<Integer> decodedTokens = new ArrayList<>();
-        callback.onResult(LlamaResult.success(decodedTokens));
+        try {
+            int[] tokenArray = new int[tokens.length];
+            for (int i = 0; i < tokens.length; i++) tokenArray[i] = tokens[i];
+            List<Float> floatSamples = decodeAudioTokensNative(context.getNativeContextId(), tokenArray);
+            // Convert float PCM samples to integer representation (multiply by 32767 for 16-bit range)
+            List<Integer> intSamples = new ArrayList<>();
+            if (floatSamples != null) {
+                for (Float f : floatSamples) {
+                    intSamples.add((int) (f * 32767.0f));
+                }
+            }
+            callback.onResult(LlamaResult.success(intSamples));
+        } catch (Exception e) {
+            Log.e(TAG, "decodeAudioTokens failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("decodeAudioTokens failed: " + e.getMessage())));
+        }
     }
 
     public void releaseVocoder(int contextId, LlamaCallback<Void> callback) {
@@ -1147,9 +1295,14 @@ public class LlamaCpp {
             callback.onResult(LlamaResult.failure(new LlamaError("Context not found")));
             return;
         }
-
-        context.setVocoderEnabled(false);
-        callback.onResult(LlamaResult.success(null));
+        try {
+            releaseVocoderNative(context.getNativeContextId());
+            context.setVocoderEnabled(false);
+            callback.onResult(LlamaResult.success(null));
+        } catch (Exception e) {
+            Log.e(TAG, "releaseVocoder failed: " + e.getMessage());
+            callback.onResult(LlamaResult.failure(new LlamaError("releaseVocoder failed: " + e.getMessage())));
+        }
     }
 
     // MARK: - Callback Interface
@@ -1159,8 +1312,6 @@ public class LlamaCpp {
 
     // Add this method to get proper storage paths
     private String[] getModelSearchPaths(String filename) {
-        String packageName = context.getPackageName();
-        
         List<String> paths = new ArrayList<>();
         
         // Internal storage (always available, no permissions needed)

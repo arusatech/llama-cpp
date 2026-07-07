@@ -3,6 +3,8 @@
 #include "cap-completion.h"
 #include "cap-embedding.h"
 #include "cap-native-server.h"
+#include "nlohmann/json.hpp"
+#include "llama.h"
 #include <android/log.h>
 #include <cstring>
 #include <memory>
@@ -620,9 +622,56 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_completionNative(
         }
         
         temperature = jni_utils::jsobject_opt_double(env, params, "temperature", 0.7);
-        
-        LOGI("Completion params - prompt: %s, n_predict: %d, temperature: %.2f", 
-             prompt_str.c_str(), n_predict, temperature);
+
+        // --- Full sampling parameter propagation ---
+        ctx->params.sampling.top_k    = (int)jni_utils::jsobject_opt_double(env, params, "top_k", 40);
+        ctx->params.sampling.top_p    = (float)jni_utils::jsobject_opt_double(env, params, "top_p", 0.95);
+        ctx->params.sampling.min_p    = (float)jni_utils::jsobject_opt_double(env, params, "min_p", 0.05);
+        ctx->params.sampling.typical_p = (float)jni_utils::jsobject_opt_double(env, params, "typical_p", 1.0);
+        ctx->params.sampling.penalty_repeat  = (float)jni_utils::jsobject_opt_double(env, params, "penalty_repeat", 1.1);
+        ctx->params.sampling.penalty_freq    = (float)jni_utils::jsobject_opt_double(env, params, "penalty_freq", 0.0);
+        ctx->params.sampling.penalty_present = (float)jni_utils::jsobject_opt_double(env, params, "penalty_present", 0.0);
+        ctx->params.sampling.penalty_last_n  = (int)jni_utils::jsobject_opt_double(env, params, "penalty_last_n", 64);
+        ctx->params.sampling.mirostat        = (int)jni_utils::jsobject_opt_double(env, params, "mirostat", 0);
+        ctx->params.sampling.mirostat_tau    = (float)jni_utils::jsobject_opt_double(env, params, "mirostat_tau", 5.0);
+        ctx->params.sampling.mirostat_eta    = (float)jni_utils::jsobject_opt_double(env, params, "mirostat_eta", 0.1);
+        ctx->params.sampling.xtc_probability = (float)jni_utils::jsobject_opt_double(env, params, "xtc_probability", 0.0);
+        ctx->params.sampling.xtc_threshold   = (float)jni_utils::jsobject_opt_double(env, params, "xtc_threshold", 0.1);
+        ctx->params.sampling.dry_multiplier  = (float)jni_utils::jsobject_opt_double(env, params, "dry_multiplier", 0.0);
+        ctx->params.sampling.dry_base        = (float)jni_utils::jsobject_opt_double(env, params, "dry_base", 1.75);
+        ctx->params.sampling.dry_allowed_length = (int)jni_utils::jsobject_opt_double(env, params, "dry_allowed_length", 2);
+        ctx->params.sampling.dry_penalty_last_n = (int)jni_utils::jsobject_opt_double(env, params, "dry_penalty_last_n", -1);
+        ctx->params.sampling.top_n_sigma     = (float)jni_utils::jsobject_opt_double(env, params, "top_n_sigma", -1.0);
+        ctx->params.sampling.seed = (uint32_t)(int64_t)jni_utils::jsobject_opt_double(env, params, "seed", -1);
+        ctx->params.sampling.n_probs = (int)jni_utils::jsobject_opt_double(env, params, "n_probs", 0);
+
+        // Grammar
+        std::string grammar_str = jni_utils::jsobject_opt_string(env, params, "grammar", "");
+        ctx->params.sampling.grammar = grammar_str;
+
+        // Stop strings
+        ctx->params.antiprompt.clear();
+        if (getStringMethod) {
+            jstring stopKey = jni_utils::string_to_jstring(env, "stop");
+            jobject stopObj = env->CallObjectMethod(params, getStringMethod, stopKey);
+            env->DeleteLocalRef(stopKey);
+            if (stopObj && !env->ExceptionCheck()) {
+                // stop is passed as a JSON array string from the Java side
+                std::string stop_json = jni_utils::jstring_to_string(env, (jstring)stopObj);
+                env->DeleteLocalRef(stopObj);
+                if (!stop_json.empty() && stop_json[0] == '[') {
+                    try {
+                        auto j = nlohmann::json::parse(stop_json);
+                        for (const auto& el : j) {
+                            if (el.is_string()) ctx->params.antiprompt.push_back(el.get<std::string>());
+                        }
+                    } catch (...) {}
+                }
+            } else if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        }
+        // ------------------------------------------
         
         // Set sampling parameters based on extracted values
         ctx->params.sampling.temp = temperature;
@@ -1528,6 +1577,220 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_isLlamaServerRunningNative(JNIEnv *en
     return cap_llama_server_is_running() ? JNI_TRUE : JNI_FALSE;
 }
 
-} // extern "C"
+// ---------------------------------------------------------------------------
+// Rerank
+// ---------------------------------------------------------------------------
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_rerankNative(
+    JNIEnv* env, jobject thiz, jlong contextId, jstring query, jobjectArray documents, jobject params) {
+    (void)thiz; (void)params;
+    try {
+        auto it = contexts.find(contextId);
+        if (it == contexts.end() || !it->second || !it->second->ctx) {
+            throw_java_exception(env, "java/lang/RuntimeException", "Context not found");
+            return nullptr;
+        }
+        auto& ctx = it->second;
+        std::string query_str = jni_utils::jstring_to_string(env, query);
+        jsize n_docs = env->GetArrayLength(documents);
+        std::vector<std::string> docs;
+        for (jsize i = 0; i < n_docs; i++) {
+            jstring js = (jstring)env->GetObjectArrayElement(documents, i);
+            docs.push_back(jni_utils::jstring_to_string(env, js));
+            env->DeleteLocalRef(js);
+        }
+        if (!ctx->completion) {
+            ctx->completion = new capllama::llama_cap_context_completion(ctx.get());
+        }
+        std::vector<float> scores = ctx->completion->rerank(query_str, docs);
+        jclass alClass = env->FindClass("java/util/ArrayList");
+        jobject resultList = env->NewObject(alClass,
+            env->GetMethodID(alClass, "<init>", "()V"));
+        jmethodID addM = env->GetMethodID(alClass, "add", "(Ljava/lang/Object;)Z");
+        jclass hmClass = env->FindClass("java/util/HashMap");
+        jmethodID hmCtor = env->GetMethodID(hmClass, "<init>", "()V");
+        jmethodID putM   = env->GetMethodID(hmClass, "put",
+            "(Ljava/lang/Object;)Ljava/lang/Object;");
+        // HashMap.put returns Object, but we only need the side-effect
+        jmethodID hmPut = env->GetMethodID(hmClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        for (size_t i = 0; i < scores.size(); i++) {
+            jobject map = env->NewObject(hmClass, hmCtor);
+            jclass dblC = env->FindClass("java/lang/Double");
+            jobject scoreObj = env->NewObject(dblC,
+                env->GetMethodID(dblC, "<init>", "(D)V"), (jdouble)scores[i]);
+            jclass intC = env->FindClass("java/lang/Integer");
+            jobject idxObj = env->NewObject(intC,
+                env->GetMethodID(intC, "<init>", "(I)V"), (jint)i);
+            env->CallObjectMethod(map, hmPut,
+                jni_utils::string_to_jstring(env, "score"), scoreObj);
+            env->CallObjectMethod(map, hmPut,
+                jni_utils::string_to_jstring(env, "index"), idxObj);
+            env->CallBooleanMethod(resultList, addM, map);
+            env->DeleteLocalRef(map);
+            env->DeleteLocalRef(scoreObj);
+            env->DeleteLocalRef(idxObj);
+        }
+        return resultList;
+    } catch (const std::exception& e) {
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bench
+// ---------------------------------------------------------------------------
+JNIEXPORT jstring JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_benchNative(
+    JNIEnv* env, jobject thiz, jlong contextId, jint pp, jint tg, jint pl, jint nr) {
+    (void)thiz;
+    try {
+        auto it = contexts.find(contextId);
+        if (it == contexts.end() || !it->second || !it->second->ctx) {
+            throw_java_exception(env, "java/lang/RuntimeException", "Context not found");
+            return nullptr;
+        }
+        auto& ctx = it->second;
+        if (!ctx->completion) {
+            ctx->completion = new capllama::llama_cap_context_completion(ctx.get());
+        }
+        std::string result = ctx->completion->bench(pp, tg, pl, nr);
+        return jni_utils::string_to_jstring(env, result);
+    } catch (const std::exception& e) {
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session management — backed by llama_state_save/load_file
+// ---------------------------------------------------------------------------
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_loadSessionNative(
+    JNIEnv* env, jobject thiz, jlong contextId, jstring filepath) {
+    (void)thiz;
+    try {
+        auto it = contexts.find(contextId);
+        if (it == contexts.end() || !it->second || !it->second->ctx) {
+            throw_java_exception(env, "java/lang/RuntimeException", "Context not found");
+            return nullptr;
+        }
+        auto& ctx = it->second;
+        std::string path = jni_utils::jstring_to_string(env, filepath);
+        // Load KV-cache state
+        std::vector<llama_token> session_tokens;
+        size_t n_token_count = 0;
+        const size_t max_tokens = ctx->n_ctx;
+        session_tokens.resize(max_tokens);
+        bool ok = llama_state_load_file(ctx->ctx, path.c_str(),
+            session_tokens.data(), max_tokens, &n_token_count);
+        if (!ok) {
+            throw_java_exception(env, "java/lang/RuntimeException",
+                ("Failed to load session from: " + path).c_str());
+            return nullptr;
+        }
+        session_tokens.resize(n_token_count);
+        // Rebuild the embd vector so the next completion continues from the right n_past
+        if (ctx->completion) {
+            ctx->completion->embd = session_tokens;
+            ctx->completion->n_past = (llama_pos)n_token_count;
+        }
+        // Build result map
+        jclass hmClass  = env->FindClass("java/util/HashMap");
+        jobject map = env->NewObject(hmClass, env->GetMethodID(hmClass, "<init>", "()V"));
+        jmethodID put   = env->GetMethodID(hmClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        jclass intC = env->FindClass("java/lang/Integer");
+        jobject nTok = env->NewObject(intC,
+            env->GetMethodID(intC, "<init>", "(I)V"), (jint)n_token_count);
+        env->CallObjectMethod(map, put,
+            jni_utils::string_to_jstring(env, "tokens_loaded"), nTok);
+        env->CallObjectMethod(map, put,
+            jni_utils::string_to_jstring(env, "prompt"),
+            jni_utils::string_to_jstring(env, ""));
+        env->DeleteLocalRef(nTok);
+        return map;
+    } catch (const std::exception& e) {
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return nullptr;
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_saveSessionNative(
+    JNIEnv* env, jobject thiz, jlong contextId, jstring filepath, jint size) {
+    (void)thiz;
+    try {
+        auto it = contexts.find(contextId);
+        if (it == contexts.end() || !it->second || !it->second->ctx) {
+            throw_java_exception(env, "java/lang/RuntimeException", "Context not found");
+            return -1;
+        }
+        auto& ctx = it->second;
+        std::string path = jni_utils::jstring_to_string(env, filepath);
+        // Determine how many tokens to save (n_past capped by requested size)
+        const std::vector<llama_token>* embd_ptr = nullptr;
+        if (ctx->completion) embd_ptr = &ctx->completion->embd;
+        std::vector<llama_token> empty_embd;
+        const std::vector<llama_token>& embd = embd_ptr ? *embd_ptr : empty_embd;
+        size_t n_save = (size >= 0 && (size_t)size < embd.size()) ? (size_t)size : embd.size();
+        bool ok = llama_state_save_file(ctx->ctx, path.c_str(),
+            embd.data(), n_save);
+        if (!ok) {
+            throw_java_exception(env, "java/lang/RuntimeException",
+                ("Failed to save session to: " + path).c_str());
+            return -1;
+        }
+        return (jint)n_save;
+    } catch (const std::exception& e) {
+        throw_java_exception(env, "java/lang/RuntimeException", e.what());
+        return -1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LoRA adapters — delegate to jni-lora.cpp implementations
+// Note: jni-lora.cpp is included via CMakeLists, its functions use the same
+// `contexts` map defined in this translation unit.
+// The Java-side now declares native int applyLoraAdaptersNative(long, Object[]).
+// We bridge Object[] → jobjectArray here.
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative(
+    JNIEnv* env, jobject thiz, jlong contextId, jobjectArray loraAdapters) {
+    // Forward directly — jni-lora.cpp has the same signature from the old declaration.
+    // (Defined in jni-lora.cpp, linked together.)
+    extern JNIEXPORT jint JNICALL
+    Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative_impl(
+        JNIEnv*, jobject, jlong, jobjectArray);
+    return Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative_impl(
+        env, thiz, contextId, loraAdapters);
+}
+
+// Forward removeLoraAdaptersNative and getLoadedLoraAdaptersNative from jni-lora.cpp
+extern "C" {
+
+JNIEXPORT void JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative(
+    JNIEnv* env, jobject thiz, jlong contextId) {
+    extern JNIEXPORT void JNICALL
+    Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative_impl(
+        JNIEnv*, jobject, jlong);
+    Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative_impl(
+        env, thiz, contextId);
+}
+
+JNIEXPORT jobject JNICALL
+Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative(
+    JNIEnv* env, jobject thiz, jlong contextId) {
+    extern JNIEXPORT jobject JNICALL
+    Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative_impl(
+        JNIEnv*, jobject, jlong);
+    return Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative_impl(
+        env, thiz, contextId);
+}
+
+} // extern "C" (LoRA forwarders)
 
 } // namespace jni_utils

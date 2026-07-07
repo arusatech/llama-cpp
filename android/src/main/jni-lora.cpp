@@ -1,7 +1,9 @@
 // LoRA Adapter Methods for Android JNI
+// Note: These are defined as _impl variants; the public JNI entry points in
+// jni.cpp forward to them. This avoids duplicate-symbol conflicts at link time.
 
 JNIEXPORT jint JNICALL
-Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative(
+Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative_impl(
     JNIEnv* env, jobject thiz, jlong contextId, jobjectArray loraAdaptersArray) {
     
     try {
@@ -100,7 +102,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_applyLoraAdaptersNative(
 }
 
 JNIEXPORT void JNICALL
-Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative(
+Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative_impl(
     JNIEnv* env, jobject thiz, jlong contextId) {
     
     try {
@@ -130,7 +132,7 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_removeLoraAdaptersNative(
 }
 
 JNIEXPORT jobject JNICALL
-Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative(
+Java_ai_annadata_plugin_capacitor_LlamaCpp_getLoadedLoraAdaptersNative_impl(
     JNIEnv* env, jobject thiz, jlong contextId) {
     
     try {

@@ -195,8 +195,30 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   // Chat and completion
   // -------------------------------------------------------------------------
 
-  async getFormattedChat({ messages, chatTemplate }: { contextId: number; messages: string; chatTemplate?: string; params?: any }): Promise<any> {
+  async getFormattedChat({
+    contextId,
+    messages,
+    chatTemplate,
+    params,
+  }: {
+    contextId: number;
+    messages: string;
+    chatTemplate?: string;
+    params?: any;
+  }): Promise<any> {
     const parsed: Array<{ role: string; content: string }> = JSON.parse(messages);
+
+    // If the provider exposes a native getFormattedChat (desktop sidecar or WASM with Jinja),
+    // delegate to it so model-embedded templates are used instead of client-side formatters.
+    const modelId = this.contextToModel.get(contextId);
+    if (modelId && typeof (this.provider as any).getFormattedChat === 'function') {
+      try {
+        return await (this.provider as any).getFormattedChat(modelId, messages, chatTemplate, params);
+      } catch {
+        // Fall through to client-side formatting
+      }
+    }
+
     const prompt = formatMessagesWithTemplate(parsed, chatTemplate);
     return { type: 'llama-chat', prompt, has_media: false, media_paths: [] };
   }
@@ -220,9 +242,16 @@ export class LlamaCppWeb implements LlamaCppPlugin {
             prompt: params.prompt,
             max_tokens: params.n_predict,
             temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            min_p: params.min_p,
+            repeat_penalty: params.penalty_repeat,
+            seed: params.seed,
+            stop: params.stop,
+            grammar: params.grammar,
             stream: true,
           },
-          (evt) => {
+          (evt: any) => {
             this.emitListener('@LlamaCpp_onToken', {
               contextId,
               token: evt.token,
@@ -236,6 +265,13 @@ export class LlamaCppWeb implements LlamaCppPlugin {
             prompt: params.prompt,
             max_tokens: params.n_predict,
             temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            min_p: params.min_p,
+            repeat_penalty: params.penalty_repeat,
+            seed: params.seed,
+            stop: params.stop,
+            grammar: params.grammar,
             stream: false,
           });
 
@@ -270,15 +306,24 @@ export class LlamaCppWeb implements LlamaCppPlugin {
     };
   }
 
-  // Fix #7: implement chat convenience helpers (#7)
-  async chat({ contextId, messages, params }: {
+  // Fix #7: implement chat convenience helpers using proper template formatting
+  async chat({ contextId, messages, system, chatTemplate, params }: {
     contextId: number;
     messages: Array<{ role: string; content: string }>;
     system?: string;
     chatTemplate?: string;
     params?: any;
   }): Promise<NativeCompletionResult> {
-    const prompt = messages.map((m) => `${m.role}: ${m.content}`).join('\n') + '\nassistant:';
+    const allMessages = system
+      ? [{ role: 'system', content: system }, ...messages]
+      : messages;
+    const formatted = await this.getFormattedChat({
+      contextId,
+      messages: JSON.stringify(allMessages),
+      chatTemplate,
+      params,
+    });
+    const prompt = (formatted as any).prompt ?? JSON.stringify(allMessages);
     return this.completion({ contextId, params: { ...params, prompt } });
   }
 
