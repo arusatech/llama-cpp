@@ -203,17 +203,16 @@ const wasmMemoryDiagnostics = (em: EmscriptenModule | null): Record<string, unkn
   };
 };
 
-// Fix #15: worker URL resolution is now explicit and bundler-friendly.
-// - First try the global escape hatch (__LLAMA_WORKER_URL__) set by the app.
-// - Then try the canonical package-relative path using import.meta.url so
-//   Vite / Rollup / Webpack can detect it as a static asset and bundle it.
-// - Fall back to a same-origin relative path for legacy setups.
+// Resolve llama_engine.js candidates (worker-relative + app overrides).
 const resolveModuleCandidates = (): string[] => {
   const candidates: string[] = [];
+  const g = globalThis as any;
 
-  const customUrl = (globalThis as any)?.__LLAMA_WORKER_URL__;
-  if (typeof customUrl === 'string' && customUrl.length > 0) {
-    candidates.push(customUrl);
+  for (const key of ['__LLAMA_WASM_MODULE_URL__', '__LLAMA_ENGINE_URL__']) {
+    const customUrl = g?.[key];
+    if (typeof customUrl === 'string' && customUrl.length > 0) {
+      candidates.push(customUrl);
+    }
   }
 
   try {
@@ -225,8 +224,9 @@ const resolveModuleCandidates = (): string[] => {
     // import.meta.url unavailable (CommonJS transform or test runner).
   }
 
-  const origin = (globalThis as any)?.location?.origin ?? '';
+  const origin = g?.location?.origin ?? '';
   if (origin) {
+    candidates.push(`${origin}/llama-cpp/wasm/llama_engine.js`);
     candidates.push(`${origin}/dist/wasm/llama_engine.js`);
     candidates.push(`${origin}/wasm/llama_engine.js`);
   }
@@ -252,7 +252,7 @@ const loadWasmModule = async (): Promise<WasmModule> => {
   }
   throw new Error(
     `Unable to load wasm wrapper module (llama_engine.js). ` +
-    `Set window.__LLAMA_WORKER_URL__ to the correct path. ` +
+    `Set window.__LLAMA_WASM_MODULE_URL__ to llama_engine.js. ` +
     `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   );
 };

@@ -39,19 +39,43 @@ const EVENT_ON_INIT_CONTEXT_PROGRESS = '@LlamaCpp_onInitContextProgress';
 const EVENT_ON_TOKEN = '@LlamaCpp_onToken';
 const EVENT_ON_NATIVE_LOG = '@LlamaCpp_onNativeLog';
 
-// Register the plugin
-const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp');
+// Register the plugin — web uses WASM; Electron desktop uses sidecar (via LlamaCppDesktop).
+const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp', {
+  web: () =>
+    import('./isomorphic/desktop.runtime').then(async ({ isDesktopRuntime }) => {
+      if (isDesktopRuntime()) {
+        const m = await import('./desktop');
+        return new m.LlamaCppDesktop();
+      }
+      const w = await import('./web');
+      return new w.LlamaCppWeb();
+    }),
+});
 
 // Log listeners management
 const logListeners: Array<(level: string, text: string) => void> = [];
 
-// Set up native log listener
-LlamaCpp.addListener(EVENT_ON_NATIVE_LOG, (evt: { level: string; text: string }) => {
-  logListeners.forEach((listener) => listener(evt.level, evt.text));
-});
+// Best-effort wiring: Capacitor stubs can throw synchronously when a platform
+// implementation is not ready yet (Node/CJS load, first paint before web impl).
+try {
+  const sub = LlamaCpp.addListener(EVENT_ON_NATIVE_LOG, (evt: { level: string; text: string }) => {
+    logListeners.forEach((listener) => listener(evt.level, evt.text));
+  }) as unknown;
+  if (sub && typeof (sub as Promise<unknown>).catch === 'function') {
+    (sub as Promise<unknown>).catch(() => {});
+  }
+} catch {
+  /* ignore until platform impl is loaded */
+}
 
-// Trigger unset to use default log callback
-LlamaCpp?.toggleNativeLog?.({ enabled: false })?.catch?.(() => {});
+try {
+  const p = LlamaCpp.toggleNativeLog?.({ enabled: false });
+  if (p && typeof (p as Promise<unknown>).catch === 'function') {
+    (p as Promise<unknown>).catch(() => {});
+  }
+} catch {
+  /* ignore unimplemented / sync stub throw */
+}
 
 // High-level types for the plugin interface
 export type RNLlamaMessagePart = LlamaCppMessagePart;

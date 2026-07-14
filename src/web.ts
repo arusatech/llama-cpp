@@ -1,4 +1,3 @@
-import { registerPlugin } from '@capacitor/core';
 import type { LlamaCppPlugin, NativeLlamaContext, NativeCompletionResult, NativeTokenizeResult } from './definitions';
 import { WebProvider } from './isomorphic/provider.web';
 import { ensureModelInOpfs } from './storage/opfs.store';
@@ -744,17 +743,4 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   }
 }
 
-const LlamaCpp = registerPlugin<LlamaCppPlugin>('LlamaCpp', {
-  web: () =>
-    import('./isomorphic/desktop.runtime').then(async ({ isDesktopRuntime }) => {
-      if (isDesktopRuntime()) {
-        const m = await import('./desktop');
-        return new m.LlamaCppDesktop();
-      }
-      const w = await import('./web');
-      return new w.LlamaCppWeb();
-    }),
-});
-
 export * from './definitions';
-export { LlamaCpp };

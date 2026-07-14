@@ -2,7 +2,7 @@
   "name": "llama-cpp-capacitor",
   "version": "0.2.2",
   "description": "A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference with chat-first API design. Complete iOS and Android support: text generation, chat, multimodal, TTS, LoRA, embeddings, and more.",
-  "main": "dist/plugin.cjs.js",
+  "main": "dist/plugin.cjs",
   "type": "module",
   "module": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
@@ -10,7 +10,7 @@
     ".": {
       "types": "./dist/esm/index.d.ts",
       "import": "./dist/esm/index.js",
-      "require": "./dist/plugin.cjs.js",
+      "require": "./dist/plugin.cjs",
       "default": "./dist/esm/index.js"
     },
     "./wasm/llama_engine.js": {
@@ -59,7 +59,10 @@
     "scripts/ensure-desktop-sidecar-bundle.cjs",
     "scripts/build-sidecar.sh",
     "scripts/build-sidecar-linux.sh",
-    "scripts/build-sidecar-win.bat"
+    "scripts/build-sidecar-win.bat",
+    "scripts/build-js-preserve-wasm.cjs",
+    "scripts/fix-esm-extensions.cjs",
+    "scripts/prepare-js-dist.cjs"
   ],
   "readme": "README.md",
   "author": "Mr. Yakub Mohammad <yakub@annadata.ai> (yakub@arusatech.com, yakub@arusallc.com)",
@@ -107,6 +110,8 @@
     "swiftlint": "node-swiftlint",
     "docgen": "npx docgen --api LlamaCppPlugin --output-readme README.md --output-json dist/docs.json",
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
+    "build:js": "node ./scripts/build-js-preserve-wasm.cjs",
+    "prepare": "node ./scripts/prepare-js-dist.cjs",
     "build:wasm": "LLAMA_WASM_JSPI=1 LLAMA_WASM_PTHREAD=0 ./scripts/build-wasm.sh",
     "build:wasm:jspi": "LLAMA_WASM_JSPI=1 LLAMA_WASM_PTHREAD=0 ./scripts/build-wasm.sh",
     "build:wasm:pthreads": "LLAMA_WASM_JSPI=1 LLAMA_WASM_PTHREAD=1 ./scripts/build-wasm.sh",
@@ -176,7 +181,12 @@
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "@capacitor/core": ">=8.0.0"
+    "@capacitor/core": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@capacitor/core": {
+      "optional": false
+    }
   },
   "prettier": "@ionic/prettier-config",
   "swiftlint": "@ionic/swiftlint-config",

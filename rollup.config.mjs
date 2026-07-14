@@ -13,7 +13,8 @@ export default {
       inlineDynamicImports: true,
     },
     {
-      file: 'dist/plugin.cjs.js',
+      // Must be .cjs: package.json has "type":"module", so *.js is treated as ESM.
+      file: 'dist/plugin.cjs',
       format: 'cjs',
       sourcemap: true,
       inlineDynamicImports: true,

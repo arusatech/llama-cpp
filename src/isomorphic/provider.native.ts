@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { LlamaCppPlugin } from '../definitions';
 import type {
   EmbedRequest,
@@ -23,7 +23,18 @@ type TokenNativeEvent = {
   };
 };
 
-const plugin = registerPlugin<LlamaCppPlugin>('LlamaCpp');
+/** Prefer the plugin instance registered by src/index.ts. */
+const getPlugin = (): LlamaCppPlugin => {
+  const caps = Capacitor as unknown as {
+    Plugins?: Record<string, LlamaCppPlugin>;
+    getPlugin?: (name: string) => LlamaCppPlugin | undefined;
+  };
+  return (
+    caps.Plugins?.LlamaCpp ??
+    caps.getPlugin?.('LlamaCpp') ??
+    registerPlugin<LlamaCppPlugin>('LlamaCpp')
+  );
+};
 
 export class NativeProvider implements LlmProvider {
   readonly platform = 'native' as const;
@@ -32,7 +43,7 @@ export class NativeProvider implements LlmProvider {
   private scheduler = new DefaultModelScheduler(MAX_MODELS);
 
   async initialize(opts: InitializeOptions): Promise<void> {
-    await plugin.setContextLimit({ limit: MAX_MODELS });
+    await getPlugin().setContextLimit({ limit: MAX_MODELS });
     await this.loadModel(opts);
   }
 
@@ -59,7 +70,7 @@ export class NativeProvider implements LlmProvider {
     this.scheduler.ensureCapacity(opts.modelId, modelBytes, memory, reserveBytes);
 
     const contextId = this.nextContextId++;
-    await plugin.initContext({
+    await getPlugin().initContext({
       contextId,
       params: {
         model: opts.modelPath,
@@ -77,7 +88,7 @@ export class NativeProvider implements LlmProvider {
     if (contextId === undefined) {
       return;
     }
-    await plugin.releaseContext({ contextId });
+    await getPlugin().releaseContext({ contextId });
     this.contextByModel.delete(modelId);
     this.scheduler.markUnloaded(modelId);
   }
@@ -92,7 +103,7 @@ export class NativeProvider implements LlmProvider {
       throw new LlmError('INVALID_REQUEST', 'prompt or messages is required');
     }
 
-    const completion = await plugin.completion({
+    const completion = await getPlugin().completion({
       contextId,
       params: {
         prompt,
@@ -121,7 +132,7 @@ export class NativeProvider implements LlmProvider {
     }
 
     let tokenIndex = 0;
-    const listener = await (plugin as any).addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
+    const listener = await (getPlugin() as any).addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
       if (evt.contextId !== contextId) return;
       const token = evt.tokenResult?.token ?? '';
       if (!token) return;
@@ -129,7 +140,7 @@ export class NativeProvider implements LlmProvider {
     });
 
     try {
-      const completion = await plugin.completion({
+      const completion = await getPlugin().completion({
         contextId,
         params: {
           prompt,
@@ -159,7 +170,7 @@ export class NativeProvider implements LlmProvider {
     const inputs = Array.isArray(req.input) ? req.input : [req.input];
     const vectors: number[][] = [];
     for (const text of inputs) {
-      const res = await plugin.embedding({
+      const res = await getPlugin().embedding({
         contextId,
         text,
         params: {},
