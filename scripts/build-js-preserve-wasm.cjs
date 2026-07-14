@@ -50,4 +50,4 @@ for (const name of ['wasm', 'workers']) {
 }
 rmSync(stash, { recursive: true, force: true });
 
-console.log('[llama-cpp-capacitor] build:js complete (wasm preserved if present)');
+console.log('[llama-cpp-pro] build:js complete (wasm preserved if present)');

@@ -32,7 +32,7 @@ npm --version
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/arusatech/llama-cpp.git
+git clone https://github.com/arusatech/llama-cpp-pro.git
 cd llama-cpp
 npm install
 ```
@@ -383,7 +383,7 @@ LLAMA_WASM_EMBED_CPP=1 npm run build:wasm:embed
 For issues:
 
 1. Check [WASM_FFI_IMPLEMENTATION.md](docs/WASM_FFI_IMPLEMENTATION.md)
-2. Review [GitHub Issues](https://github.com/arusatech/llama-cpp/issues)
+2. Review [GitHub Issues](https://github.com/arusatech/llama-cpp-pro/issues)
 3. See [llama.cpp README](cpp/README.md) for C/C++ details
 
 ## License

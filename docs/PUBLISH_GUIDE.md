@@ -1,4 +1,4 @@
-# Publishing llama-cpp-capacitor for iOS + Android
+# Publishing llama-cpp-pro for iOS + Android
 
 ## Overview
 
@@ -47,7 +47,7 @@ ls -la ios/Frameworks/llama-cpp.framework/llama-cpp
 npm pack
 ```
 
-This creates `llama-cpp-capacitor-X.X.X.tgz` containing:
+This creates `llama-cpp-pro-X.X.X.tgz` containing:
 - Android `.so` libraries in `android/src/main/jniLibs/`
 - iOS framework in `ios/Frameworks/` (if copied)
 - TypeScript definitions
@@ -111,7 +111,7 @@ npm run build
 npm pack
 
 # 6. Test locally (optional)
-npm install ./llama-cpp-capacitor-X.X.X.tgz
+npm install ./llama-cpp-pro-X.X.X.tgz
 
 # 7. Publish
 npm login
@@ -124,7 +124,7 @@ npm publish
 
 ```bash
 # Install the published package
-npm install llama-cpp-capacitor@latest
+npm install llama-cpp-pro@latest
 
 # Sync Capacitor
 npx cap sync

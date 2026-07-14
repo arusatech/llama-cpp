@@ -32,7 +32,7 @@
 
 ```bash
 # Install via npm
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 
 # Add Android platform
 npx cap add android

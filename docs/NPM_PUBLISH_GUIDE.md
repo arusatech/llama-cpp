@@ -30,7 +30,7 @@ npm error 403 403 Forbidden - Two-factor authentication or granular access token
    - Name it (e.g., "llama-cpp-publish")
    - Set expiration (or "No expiration" for CI/CD)
    - **Important:** Enable "Bypass 2FA" permission
-   - Select package: `llama-cpp-capacitor`
+   - Select package: `llama-cpp-pro`
    - Select permissions: `Read and Publish`
    - Click "Generate Token"
    - **Copy the token immediately** (you won't see it again!)
@@ -125,7 +125,7 @@ npm publish
 ### If using a token and still getting 403:
 - Verify the token has "Bypass 2FA" enabled
 - Check token hasn't expired
-- Ensure token has "Publish" permission for `llama-cpp-capacitor`
+- Ensure token has "Publish" permission for `llama-cpp-pro`
 
 ### If you need to check current auth:
 ```bash

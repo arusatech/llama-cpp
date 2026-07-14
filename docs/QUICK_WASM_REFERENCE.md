@@ -194,7 +194,7 @@ hexdump -C /path/to/model.gguf | head
 ## 💡 Usage Example
 
 ```typescript
-import { ProviderFactory } from 'llama-cpp-capacitor';
+import { ProviderFactory } from 'llama-cpp-pro';
 
 // Create provider (auto-detects platform)
 const provider = ProviderFactory.createProvider();

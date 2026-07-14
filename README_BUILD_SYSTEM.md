@@ -1,4 +1,4 @@
-# Build System Reference — llama-cpp-capacitor 0.2.1
+# Build System Reference — llama-cpp-pro 0.2.1
 
 Complete consolidated guide covering build variants, package configuration, and release procedures for all platforms: iOS, Android, Web/PWA, and Desktop (Electron).
 
@@ -345,7 +345,7 @@ On Web, `getFormattedChat` delegates to `provider.getFormattedChat` when availab
 Models are stored in the browser's Origin Private File System. Use `downloadModel` or `ensureModelInOpfs` to cache GGUF files:
 
 ```typescript
-import { LlamaCpp } from 'llama-cpp-capacitor';
+import { LlamaCpp } from 'llama-cpp-pro';
 await LlamaCpp.downloadModel({ url: 'https://…/model.gguf', filename: 'model.gguf' });
 ```
 
@@ -399,14 +399,14 @@ npm run build:desktop
 
 ```javascript
 // Main process (main.js / main.ts)
-const { registerLlamaDesktopIpc } = require('llama-cpp-capacitor/desktop');
+const { registerLlamaDesktopIpc } = require('llama-cpp-pro/desktop');
 registerLlamaDesktopIpc({ ipcMain, app });
 
 // Preload script
-require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer);
+require('llama-cpp-pro/desktop/preload')(contextBridge, ipcRenderer);
 
 // Renderer / Capacitor web layer — auto-selected via LlamaCppDesktop
-import { LlamaCpp } from 'llama-cpp-capacitor';
+import { LlamaCpp } from 'llama-cpp-pro';
 const ctx = await LlamaCpp.initContext({ contextId: 0, params: { model: '/path/to/model.gguf' } });
 ```
 
@@ -414,7 +414,7 @@ const ctx = await LlamaCpp.initContext({ contextId: 0, params: { model: '/path/t
 
 ```javascript
 // electron-builder.config.js
-const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+const llama = require('llama-cpp-pro/desktop/electron-builder');
 module.exports = llama.merge({
   appId: 'com.yourapp.id',
   // ...your config
@@ -537,20 +537,20 @@ npm run verify:pack:artifacts
 
 ```bash
 npm pack --ignore-scripts
-# Creates: llama-cpp-capacitor-0.2.1.tgz
+# Creates: llama-cpp-pro-0.2.1.tgz
 ```
 
 ### Step 6 — Inspect tarball
 
 ```bash
 # Check contents
-tar -tzf llama-cpp-capacitor-0.2.1.tgz | head -40
+tar -tzf llama-cpp-pro-0.2.1.tgz | head -40
 
 # Check size
-du -h llama-cpp-capacitor-0.2.1.tgz
+du -h llama-cpp-pro-0.2.1.tgz
 
 # Verify platform artifacts are present
-tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep -E "(ios|android|wasm|sidecar)"
+tar -tzf llama-cpp-pro-0.2.1.tgz | grep -E "(ios|android|wasm|sidecar)"
 ```
 
 ### Step 7 — Publish
@@ -558,7 +558,7 @@ tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep -E "(ios|android|wasm|sidecar)"
 ```bash
 npm whoami      # confirm logged in
 npm publish
-npm view llama-cpp-capacitor@0.2.1
+npm view llama-cpp-pro@0.2.1
 ```
 
 ---
@@ -571,12 +571,12 @@ npm view llama-cpp-capacitor@0.2.1
 - [ ] Build completed successfully (iOS + Android + WASM)
 - [ ] `npm run verify:pack:artifacts` — all green
 - [ ] `npm pack --ignore-scripts` — tarball created
-- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep ios/Frameworks` — iOS framework present
-- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep libllama-cpp` — Android .so present
-- [ ] `tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep wasm` — WASM assets present
+- [ ] `tar -tzf llama-cpp-pro-0.2.1.tgz | grep ios/Frameworks` — iOS framework present
+- [ ] `tar -tzf llama-cpp-pro-0.2.1.tgz | grep libllama-cpp` — Android .so present
+- [ ] `tar -tzf llama-cpp-pro-0.2.1.tgz | grep wasm` — WASM assets present
 - [ ] `npm whoami` — logged in to npm
 - [ ] `npm publish` — published
-- [ ] `npm view llama-cpp-capacitor@0.2.1` — live on registry
+- [ ] `npm view llama-cpp-pro@0.2.1` — live on registry
 
 ---
 
@@ -663,7 +663,7 @@ npm run stage:desktop        # copies to extraResources/
 
 ```bash
 # Check if C++ sources were accidentally included
-tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep "^package/cpp/" | wc -l
+tar -tzf llama-cpp-pro-0.2.1.tgz | grep "^package/cpp/" | wc -l
 # Should be 0 for minimal variant
 ```
 
@@ -738,15 +738,15 @@ npm publish
 npm run clean:all
 
 # Inspect tarball
-tar -tzf llama-cpp-capacitor-0.2.1.tgz | head -40
-du -h llama-cpp-capacitor-0.2.1.tgz
+tar -tzf llama-cpp-pro-0.2.1.tgz | head -40
+du -h llama-cpp-pro-0.2.1.tgz
 ```
 
 ---
 
 ## Document Info
 
-- **Package:** llama-cpp-capacitor
+- **Package:** llama-cpp-pro
 - **Version:** 0.2.1
 - **Updated:** 2025-07-07
 - **Covers:** iOS, Android, Web/PWA, Desktop (Electron + sidecar)

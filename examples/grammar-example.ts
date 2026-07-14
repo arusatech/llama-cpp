@@ -1,8 +1,8 @@
 /**
- * Grammar and Tool Calling Examples for llama-cpp-capacitor
+ * Grammar and Tool Calling Examples for llama-cpp-pro
  */
 
-import { initLlama, convertJsonSchemaToGrammar, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, convertJsonSchemaToGrammar, LlamaContext } from 'llama-cpp-pro';
 
 // Example 1: Using GBNF Grammar directly
 async function grammarExample() {

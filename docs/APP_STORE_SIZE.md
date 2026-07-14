@@ -1,6 +1,6 @@
 # App Store Size Guide
 
-This document explains **what affects iOS/Android app size** when using `llama-cpp-capacitor`, what can be **removed or optimized**, and how to avoid bulky store uploads.
+This document explains **what affects iOS/Android app size** when using `llama-cpp-pro`, what can be **removed or optimized**, and how to avoid bulky store uploads.
 
 ---
 

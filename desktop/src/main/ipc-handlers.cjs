@@ -2,7 +2,7 @@
  * Electron main-process IPC handlers for llama-cpp desktop sidecar.
  *
  * Usage in your Electron main process (after app.whenReady):
- *   const { registerLlamaDesktopIpc } = require('llama-cpp-capacitor/desktop/ipc-handlers');
+ *   const { registerLlamaDesktopIpc } = require('llama-cpp-pro/desktop/ipc-handlers');
  *   registerLlamaDesktopIpc({ ipcMain, app });
  */
 

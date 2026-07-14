@@ -1279,7 +1279,7 @@ self.addEventListener('fetch', (event) => {
 ### Pattern 1: Basic Text Generation
 
 ```typescript
-import { initContext } from 'llama-cpp-capacitor';
+import { initContext } from 'llama-cpp-pro';
 
 const context = await initContext({
   contextId: 1,

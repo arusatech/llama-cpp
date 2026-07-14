@@ -15,7 +15,7 @@ if (existsSync(marker)) {
 const tsc = join(root, 'node_modules', '.bin', 'tsc');
 if (!existsSync(tsc)) {
   console.warn(
-    '[llama-cpp-capacitor] dist/ missing and local build tools not installed yet. Run: npm run build:js',
+    '[llama-cpp-pro] dist/ missing and local build tools not installed yet. Run: npm run build:js',
   );
   process.exit(0);
 }

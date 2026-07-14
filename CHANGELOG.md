@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Package rename:** npm package and GitHub repository are now **`llama-cpp-pro`** (formerly `llama-cpp-capacitor` / `annadata-llama-cpp`). Install with `npm install llama-cpp-pro`. Existing `llama-cpp-capacitor` publishes on npm remain available.
+
 ## [0.2.1] - 2025-07-07
 
 ### Added
@@ -230,7 +233,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Comprehensive API documentation (API_DOCUMENTATION.md)
 - Quick reference guide (QUICK_REFERENCE.md)
-- Complete TypeScript declarations (types/llama-cpp-capacitor.d.ts)
+- Complete TypeScript declarations (types/llama-cpp-pro.d.ts)
 - Fixed build warnings and improved TypeScript configuration
 - Enhanced IDE support with IntelliSense
 

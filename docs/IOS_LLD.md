@@ -740,7 +740,7 @@ cp ios/build/llama-cpp.framework/llama-cpp ios/Frameworks/llama-cpp.framework/
 ### Pattern 1: Simple Text Generation
 
 ```typescript
-import { initContext, LlamaContext } from 'llama-cpp-capacitor';
+import { initContext, LlamaContext } from 'llama-cpp-pro';
 
 const context = await initContext({
   contextId: 1,

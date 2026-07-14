@@ -1,4 +1,4 @@
-declare module 'llama-cpp-capacitor' {
+declare module 'llama-cpp-pro' {
   // Core types
   export interface NativeContextParams {
     model: string;

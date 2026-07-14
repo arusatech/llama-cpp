@@ -2,7 +2,7 @@
  * Electron preload bridge — exposes annadataLlama API to renderer.
  *
  * Usage in preload script:
- *   require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer);
+ *   require('llama-cpp-pro/desktop/preload')(contextBridge, ipcRenderer);
  */
 
 /**

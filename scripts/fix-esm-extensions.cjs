@@ -28,7 +28,7 @@ function rewrite(source) {
 }
 
 if (!statSync(esmRoot, { throwIfNoEntry: false })?.isDirectory()) {
-  console.warn('[llama-cpp-capacitor] fix-esm-extensions: dist/esm missing');
+  console.warn('[llama-cpp-pro] fix-esm-extensions: dist/esm missing');
   process.exit(0);
 }
 
@@ -42,4 +42,4 @@ for (const file of walk(esmRoot)) {
   }
 }
 
-console.log(`[llama-cpp-capacitor] fixed ESM import extensions in ${changed} file(s)`);
+console.log(`[llama-cpp-pro] fixed ESM import extensions in ${changed} file(s)`);

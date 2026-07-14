@@ -32,7 +32,7 @@
 
 ```bash
 # Install via npm
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 
 # Add iOS platform
 npx cap add ios
@@ -45,7 +45,7 @@ npx cap open ios
 ### Minimal Working Example
 
 ```typescript
-import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext } from 'llama-cpp-pro';
 
 // 1. Initialize model
 const context = await initLlama({
@@ -82,7 +82,7 @@ import {
   toggleNativeLog,
   addNativeLogListener,
   modelInfo,
-} from 'llama-cpp-capacitor';
+} from 'llama-cpp-pro';
 ```
 
 ### Type Imports
@@ -95,7 +95,7 @@ import type {
   NativeCompletionResult,
   CompletionParams,
   ContextParams,
-} from 'llama-cpp-capacitor';
+} from 'llama-cpp-pro';
 ```
 
 ### Initialization with Full Configuration
@@ -1115,7 +1115,7 @@ import {
   initLlama,
   releaseAllLlama,
   addNativeLogListener,
-} from 'llama-cpp-capacitor';
+} from 'llama-cpp-pro';
 
 class AIAssistant {
   private context: any;

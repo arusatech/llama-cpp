@@ -1,7 +1,7 @@
 {
-  "name": "llama-cpp-capacitor",
+  "name": "llama-cpp-pro",
   "version": "0.2.2",
-  "description": "A native Capacitor plugin that embeds llama.cpp directly into mobile apps, enabling offline AI inference with chat-first API design. Complete iOS and Android support: text generation, chat, multimodal, TTS, LoRA, embeddings, and more.",
+  "description": "Pro llama.cpp Capacitor plugin for offline AI on iOS, Android, Web/PWA, and Desktop — text generation, chat, multimodal, TTS, LoRA, embeddings, and more.",
   "main": "dist/plugin.cjs",
   "type": "module",
   "module": "dist/esm/index.js",
@@ -69,12 +69,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/arusatech/llama-cpp.git"
+    "url": "git+https://github.com/arusatech/llama-cpp-pro.git"
   },
   "bugs": {
-    "url": "https://github.com/arusatech/llama-cpp/issues"
+    "url": "https://github.com/arusatech/llama-cpp-pro/issues"
   },
-  "homepage": "https://github.com/arusatech/llama-cpp#readme",
+  "homepage": "https://github.com/arusatech/llama-cpp-pro#readme",
   "keywords": [
     "capacitor",
     "plugin",

@@ -1,8 +1,8 @@
 /**
- * electron-builder configuration for apps using llama-cpp-capacitor on desktop.
+ * electron-builder configuration for apps using llama-cpp-pro on desktop.
  *
  * Merge into your Electron app's package.json:
- *   const llamaDesktop = require('llama-cpp-capacitor/desktop/electron-builder');
+ *   const llamaDesktop = require('llama-cpp-pro/desktop/electron-builder');
  *   module.exports = { ...yourConfig, ...llamaDesktop.merge(yourConfig) };
  *
  * Or spread extraResources / entitlements manually from this module.
@@ -12,7 +12,7 @@ const path = require('path');
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 
-/** @param {string} [root] - llama-cpp-capacitor package root (default: auto) */
+/** @param {string} [root] - llama-cpp-pro package root (default: auto) */
 function getSidecarResourceEntries(root = PACKAGE_ROOT) {
   return {
     mac: [

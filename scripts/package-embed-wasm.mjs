@@ -2109,7 +2109,7 @@ await writeFile(dtsOutPath, dtsSrc);
 const pkgJson = {
   name: engineName,
   type: 'module',
-  description: 'Embedded llama.cpp Wasm runtime for llama-cpp-capacitor (web/PWA)',
+  description: 'Embedded llama.cpp Wasm runtime for llama-cpp-pro (web/PWA)',
   version: '0.1.0',
   license: 'MIT',
   files: [

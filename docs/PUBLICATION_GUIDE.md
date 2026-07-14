@@ -32,7 +32,7 @@ This guide outlines the steps needed to publish the llama-cpp Capacitor plugin t
 
 #### 2. **Transfer Repository**
 - Move the current repository to the `capacitor-community` organization
-- Update all references from `arusatech/llama-cpp` to `capacitor-community/llama-cpp`
+- Update all references from `arusatech/llama-cpp-pro` to `capacitor-community/llama-cpp`
 
 #### 3. **NPM Package Setup**
 ```bash

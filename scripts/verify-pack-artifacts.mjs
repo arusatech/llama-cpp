@@ -8,12 +8,12 @@ const root = resolve(process.cwd());
 let pkg;
 try {
   pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
-  if (pkg.name !== 'llama-cpp-capacitor') {
+  if (pkg.name !== 'llama-cpp-pro') {
     throw new Error('wrong package');
   }
 } catch {
-  console.error('Packaging guard: run from the llama-cpp-capacitor plugin root (directory containing package.json).');
-  console.error('Example: cd /path/to/llama-cpp-capacitor && npm run verify:pack:artifacts');
+  console.error('Packaging guard: run from the llama-cpp-pro plugin root (directory containing package.json).');
+  console.error('Example: cd /path/to/llama-cpp-pro && npm run verify:pack:artifacts');
   process.exit(1);
 }
 
@@ -244,5 +244,5 @@ await verifyPwaWasmQuality();
 verifyReleaseVersion();
 
 console.log(
-  `Packaging guard passed for llama-cpp-capacitor@${pkg.version}: iOS (Metal) + Android arm64 + PWA/WASM + SPM layout.`,
+  `Packaging guard passed for llama-cpp-pro@${pkg.version}: iOS (Metal) + Android arm64 + PWA/WASM + SPM layout.`,
 );

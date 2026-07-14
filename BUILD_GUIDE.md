@@ -1,4 +1,4 @@
-# Build Guide — llama-cpp-capacitor 0.2.1
+# Build Guide — llama-cpp-pro 0.2.1
 
 Complete build documentation for all four platforms: iOS, Android, Web/PWA, and Desktop (Electron).
 
@@ -31,7 +31,7 @@ npm run build              # TypeScript
 npm run build:native       # iOS + Android
 npm run build:pwa          # Web/WASM + worker
 npm run verify:pack:artifacts
-npm pack --ignore-scripts  # Creates llama-cpp-capacitor-0.2.1.tgz
+npm pack --ignore-scripts  # Creates llama-cpp-pro-0.2.1.tgz
 ```
 
 ---
@@ -39,7 +39,7 @@ npm pack --ignore-scripts  # Creates llama-cpp-capacitor-0.2.1.tgz
 ## Platform Architecture
 
 ```
-llama-cpp-capacitor
+llama-cpp-pro
 ├── iOS  ──────────────► llama-cpp.framework (Metal + CPU)
 │                           └── cap-ios-bridge.cpp (C ABI)
 │                           └── LlamaCpp.swift (Swift wrapper)
@@ -100,7 +100,7 @@ npx cap sync ios
 ### Rebuild from a Capacitor app
 
 ```bash
-bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
+bash node_modules/llama-cpp-pro/scripts/ensure-llama-ios-xcframework.sh
 npx cap sync ios
 ```
 
@@ -313,7 +313,7 @@ dist/workers/
 
 ```typescript
 // Download and cache a GGUF model to OPFS
-import { LlamaCpp } from 'llama-cpp-capacitor';
+import { LlamaCpp } from 'llama-cpp-pro';
 
 await LlamaCpp.downloadModel({
   url: 'https://huggingface.co/.../model.gguf',
@@ -410,7 +410,7 @@ npm run build:desktop
 
 ```javascript
 // main.js
-const { registerLlamaDesktopIpc } = require('llama-cpp-capacitor/desktop');
+const { registerLlamaDesktopIpc } = require('llama-cpp-pro/desktop');
 registerLlamaDesktopIpc({ ipcMain, app });
 ```
 
@@ -418,14 +418,14 @@ registerLlamaDesktopIpc({ ipcMain, app });
 
 ```javascript
 // preload.js
-require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer);
+require('llama-cpp-pro/desktop/preload')(contextBridge, ipcRenderer);
 ```
 
 **electron-builder config:**
 
 ```javascript
 // electron-builder.config.js
-const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+const llama = require('llama-cpp-pro/desktop/electron-builder');
 module.exports = llama.merge({
   appId: 'com.yourapp.id',
   productName: 'My App',
@@ -548,18 +548,18 @@ npm run verify:pack:artifacts
 
 # 5. Package
 npm pack --ignore-scripts
-# → llama-cpp-capacitor-0.2.1.tgz
+# → llama-cpp-pro-0.2.1.tgz
 
 # 6. Inspect
-tar -tzf llama-cpp-capacitor-0.2.1.tgz | grep -E "(ios/Frameworks|jniLibs|wasm)"
-du -h llama-cpp-capacitor-0.2.1.tgz
+tar -tzf llama-cpp-pro-0.2.1.tgz | grep -E "(ios/Frameworks|jniLibs|wasm)"
+du -h llama-cpp-pro-0.2.1.tgz
 
 # 7. Publish
 npm whoami
 npm publish
 
 # 8. Verify on registry
-npm view llama-cpp-capacitor@0.2.1
+npm view llama-cpp-pro@0.2.1
 ```
 
 ---
@@ -630,7 +630,7 @@ npm run stage:desktop
 
 ## Document Info
 
-- **Package:** llama-cpp-capacitor
+- **Package:** llama-cpp-pro
 - **Version:** 0.2.1
 - **Updated:** 2025-07-07
 - **Covers:** iOS (Metal), Android (JNI), Web/PWA (WASM), Desktop (Electron + native sidecar)

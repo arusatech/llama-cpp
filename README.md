@@ -1,8 +1,8 @@
-# llama-cpp Capacitor Plugin
+# llama-cpp-pro
 
-[![Actions Status](https://github.com/arusatech/llama-cpp/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp/actions)
+[![Actions Status](https://github.com/arusatech/llama-cpp-pro/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp-pro/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
+[![npm](https://img.shields.io/npm/v/llama-cpp-pro.svg)](https://www.npmjs.com/package/llama-cpp-pro/)
 [![Support: ANNADATA.AI](https://img.shields.io/badge/AI-ANNADATA.AI-orange.svg)](https://annadata.ai/)
 [![Principal Engineer / Architect: Mr. Yakub Mohammad](https://img.shields.io/badge/Principal%20Architect-Mr.%20Yakub%20Mohammad-blue.svg)](https://annadata.ai/)
 
@@ -253,15 +253,15 @@ See also [docs/DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md) (accelerat
 
 ```javascript
 // electron-builder.config.js in your Electron app
-const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+const llama = require('llama-cpp-pro/desktop/electron-builder');
 module.exports = llama.merge({
   appId: 'com.yourapp.id',
   // ...your existing config
 });
 ```
 
-- **Main process:** `registerLlamaDesktopIpc({ ipcMain, app })` from `llama-cpp-capacitor/desktop`
-- **Preload:** `require('llama-cpp-capacitor/desktop/preload')(contextBridge, ipcRenderer)`
+- **Main process:** `registerLlamaDesktopIpc({ ipcMain, app })` from `llama-cpp-pro/desktop`
+- **Preload:** `require('llama-cpp-pro/desktop/preload')(contextBridge, ipcRenderer)`
 - **Capacitor API:** full `LlamaCppPlugin` surface via `LlamaCppDesktop` (auto-selected in Electron)
 
 ### PWA requirements
@@ -381,7 +381,7 @@ const models = await Promise.all([
 ## 📦 Installation
 
 ```sh
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 ```
 
 **Package Size:** ~23-25 MB (minimal variant, no C++ sources, debug symbols stripped)
@@ -518,7 +518,7 @@ The iOS native framework is built as part of the build process and included in t
 
 1. Install the plugin:
 ```sh
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 ```
 
 2. Add to your iOS project:
@@ -530,7 +530,7 @@ npx cap sync ios
 **Simulator builds** (macOS + Xcode + cmake): from your **Capacitor app root** (after `npm install`), build device+simulator slices once, then re-sync. Use the script shipped inside the plugin — do not copy it into your app:
 
 ```sh
-bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
+bash node_modules/llama-cpp-pro/scripts/ensure-llama-ios-xcframework.sh
 npx cap sync ios
 ```
 
@@ -549,7 +549,7 @@ The Android native library is built as part of the build process and included in
 
 1. Install the plugin:
 ```sh
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 ```
 
 2. Add to your Android project:
@@ -570,7 +570,7 @@ The plugin includes pre-built Android libraries (`android/src/main/jniLibs/arm64
 The plugin includes complete Web/PWA support with WASM acceleration. For web applications:
 
 ```typescript
-import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext } from 'llama-cpp-pro';
 
 // Works seamlessly on Web/PWA without platform detection
 const context = await initLlama({
@@ -663,7 +663,7 @@ Speculative decoding uses a smaller "draft" model to predict multiple tokens ahe
 ### Basic Usage
 
 ```typescript
-import { initLlama } from 'llama-cpp-capacitor';
+import { initLlama } from 'llama-cpp-pro';
 
 // Initialize with speculative decoding
 const context = await initLlama({
@@ -1040,7 +1040,7 @@ console.log('Grammar-constrained output:', result.text);
 
 #### Manual JSON Schema to GBNF Conversion
 ```typescript
-import { convertJsonSchemaToGrammar } from 'llama-cpp-capacitor';
+import { convertJsonSchemaToGrammar } from 'llama-cpp-pro';
 
 const schema = {
   type: 'object',
@@ -1143,10 +1143,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) - The core inference engine
 - [Capacitor](https://capacitorjs.com/) - The cross-platform runtime
 - [llama.rn](https://github.com/mybigday/llama.rn) - Inspiration for the React Native implementation
-- [Annadata.ai](https://annadata.ai) - Complete system developed and powered by [![npm](https://img.shields.io/npm/v/llama-cpp-capacitor.svg)](https://www.npmjs.com/package/llama-cpp-capacitor/)
+- [Annadata.ai](https://annadata.ai) - Complete system developed and powered by [![npm](https://img.shields.io/npm/v/llama-cpp-pro.svg)](https://www.npmjs.com/package/llama-cpp-pro/)
 
 ## 📞 Support
 
 - 📧 Email: support@arusatech.com ; yakub@annadata.ai
-- 🐛 Issues: [GitHub Issues](https://github.com/arusatech/llama-cpp/issues)
-- 📖 Documentation: [GitHub Wiki](https://github.com/arusatech/llama-cpp/wiki)
+- 🐛 Issues: [GitHub Issues](https://github.com/arusatech/llama-cpp-pro/issues)
+- 📖 Documentation: [GitHub Wiki](https://github.com/arusatech/llama-cpp-pro/wiki)

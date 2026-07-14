@@ -1,11 +1,11 @@
 /**
- * Mobile-Optimized Speculative Decoding Example for llama-cpp-capacitor
+ * Mobile-Optimized Speculative Decoding Example for llama-cpp-pro
  * 
  * This example demonstrates how to use speculative decoding to achieve 2-8x faster
  * inference with significantly reduced battery consumption on mobile devices.
  */
 
-import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext } from 'llama-cpp-pro';
 
 // Example 1: Basic Speculative Decoding Setup
 async function basicSpeculativeDecoding() {

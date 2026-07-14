@@ -35,7 +35,7 @@
 
 ```bash
 # Install via npm
-npm install llama-cpp-capacitor
+npm install llama-cpp-pro
 
 # For web-only development
 npm install
@@ -87,7 +87,7 @@ npm run dev
 ### Minimal Working Example (TypeScript)
 
 ```typescript
-import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext } from 'llama-cpp-pro';
 
 async function main() {
     try {
@@ -120,7 +120,7 @@ main();
 ### Minimal Working Example (JavaScript)
 
 ```javascript
-import { initLlama } from 'llama-cpp-capacitor';
+import { initLlama } from 'llama-cpp-pro';
 
 async function main() {
     // Initialize model
@@ -150,7 +150,7 @@ main();
 
 ```typescript
 import React, { useState, useEffect, useRef } from 'react';
-import { initLlama, LlamaContext } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext } from 'llama-cpp-pro';
 
 export function LlamaComponent() {
     const [context, setContext] = useState<LlamaContext | null>(null);
@@ -214,7 +214,7 @@ export function LlamaComponent() {
 ### NPM Installation
 
 ```bash
-npm install llama-cpp-capacitor @capacitor/core @capacitor/webview
+npm install llama-cpp-pro @capacitor/core @capacitor/webview
 ```
 
 ### Import Statements (TypeScript)
@@ -228,7 +228,7 @@ import {
     addNativeLogListener,
     modelInfo,
     convertJsonSchemaToGrammar,
-} from 'llama-cpp-capacitor';
+} from 'llama-cpp-pro';
 
 import type {
     ContextParams,
@@ -236,7 +236,7 @@ import type {
     NativeCompletionResult,
     EmbeddingParams,
     RerankParams,
-} from 'llama-cpp-capacitor';
+} from 'llama-cpp-pro';
 ```
 
 ### Browser Requirements
@@ -297,7 +297,7 @@ module.exports = {
 The LlamaCpp web implementation uses a provider pattern:
 
 ```typescript
-import { WebProvider } from 'llama-cpp-capacitor/isomorphic/provider.web';
+import { WebProvider } from 'llama-cpp-pro/isomorphic/provider.web';
 
 // Automatic provider selection
 const provider = new WebProvider();
@@ -1025,7 +1025,7 @@ console.log('Reconstructed:', text);
 Models are automatically cached in OPFS for persistence:
 
 ```typescript
-import { ensureModelInOpfs, listManifestEntries } from 'llama-cpp-capacitor';
+import { ensureModelInOpfs, listManifestEntries } from 'llama-cpp-pro';
 
 // List cached models
 const entries = await listManifestEntries();
@@ -1084,7 +1084,7 @@ worker.postMessage({
 
 ```typescript
 // inference-worker.js
-import { initLlama } from 'llama-cpp-capacitor';
+import { initLlama } from 'llama-cpp-pro';
 
 let context;
 
@@ -1119,7 +1119,7 @@ worker.port.postMessage({ type: 'COMPLETE', prompt: 'Hello' });
 
 ```typescript
 // shared-inference-worker.js
-import { initLlama } from 'llama-cpp-capacitor';
+import { initLlama } from 'llama-cpp-pro';
 
 let context;
 
@@ -1289,7 +1289,7 @@ await releaseAllLlama();
 
 ```typescript
 import React, { useState, useRef, useEffect } from 'react';
-import { initLlama, LlamaContext, releaseAllLlama } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext, releaseAllLlama } from 'llama-cpp-pro';
 
 export function ChatBot() {
     const [context, setContext] = useState<LlamaContext | null>(null);
@@ -1432,7 +1432,7 @@ export function ChatBot() {
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { initLlama, LlamaContext, releaseAllLlama } from 'llama-cpp-capacitor';
+import { initLlama, LlamaContext, releaseAllLlama } from 'llama-cpp-pro';
 
 const context = ref<LlamaContext | null>(null);
 const messages = ref<Array<{ role: string; content: string }>>([]);

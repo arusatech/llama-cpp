@@ -2,7 +2,7 @@
  * Desktop runtime entry — GPU probe, backend selection, sidecar lifecycle.
  *
  * Usage (Electron main process):
- *   const desktop = require('llama-cpp-capacitor/desktop');
+ *   const desktop = require('llama-cpp-pro/desktop');
  *   const probe = desktop.probeGpu();
  *   const selection = desktop.selectBackend(probe);
  *   const manager = desktop.createSidecarManager();

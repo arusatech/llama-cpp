@@ -1135,7 +1135,7 @@ dependencies {
 
 **Package Contents:**
 ```
-llama-cpp-capacitor@0.2.0/
+llama-cpp-pro@0.2.0/
 ├── dist/
 │   ├── esm/
 │   ├── plugin.cjs.js
@@ -1161,7 +1161,7 @@ npm publish
 ### Pattern 1: Basic Completion
 
 ```typescript
-import { initContext } from 'llama-cpp-capacitor';
+import { initContext } from 'llama-cpp-pro';
 
 const context = await initContext({
   contextId: 1,

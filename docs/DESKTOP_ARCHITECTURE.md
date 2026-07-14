@@ -95,7 +95,7 @@ annadata-llama-cpp/
 ### 1. Main process — start sidecar
 
 ```javascript
-const desktop = require('llama-cpp-capacitor/desktop');
+const desktop = require('llama-cpp-pro/desktop');
 
 const { probe, selection } = desktop.detectBackend();
 const manager = desktop.createSidecarManager();
@@ -122,7 +122,7 @@ contextBridge.exposeInMainWorld('__annadataDesktop', true);
 ### 3. Renderer — use isomorphic API
 
 ```typescript
-import { createLlmProvider } from 'llama-cpp-capacitor';
+import { createLlmProvider } from 'llama-cpp-pro';
 
 const provider = createLlmProvider(); // → DesktopProvider in Electron
 await provider.loadModel({ modelId: 'local', modelPath: '...' });
@@ -133,7 +133,7 @@ const result = await provider.generate({ modelId: 'local', prompt: 'Hello' });
 
 ```javascript
 // electron-builder.config.js (your Electron app)
-const llama = require('llama-cpp-capacitor/desktop/electron-builder');
+const llama = require('llama-cpp-pro/desktop/electron-builder');
 
 module.exports = llama.merge({
   appId: 'com.yourapp.id',
@@ -152,7 +152,7 @@ npm run verify:desktop:bundle -- --platform=win32   # or darwin | linux
 Stage resources from the plugin package:
 
 ```bash
-cd node_modules/llama-cpp-capacitor && npm run build:desktop
+cd node_modules/llama-cpp-pro && npm run build:desktop
 ```
 
 ---
