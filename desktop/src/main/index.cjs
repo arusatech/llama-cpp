@@ -18,6 +18,12 @@ const {
 const { createSidecarManager, resolveBinaryPath } = require('./sidecar-manager.cjs');
 const { createSidecarClient } = require('./sidecar-client.cjs');
 const { getModelsDir, getSettingsDir } = require('./model-store.cjs');
+const {
+  resolvePackageRoot,
+  getDevExtraResourcesDir,
+  getResourcesPathForApp,
+  assertSidecarBinary,
+} = require('../../resolve-package-root.cjs');
 
 /**
  * Full desktop bootstrap: probe hardware, read user settings, select backend.
@@ -40,9 +46,13 @@ module.exports = {
   createSidecarManager,
   createSidecarClient,
   resolveBinaryPath,
+  resolvePackageRoot,
+  getDevExtraResourcesDir,
+  getResourcesPathForApp,
+  assertSidecarBinary,
   getModelsDir,
   getSettingsDir,
   registerLlamaDesktopIpc: require('./ipc-handlers.cjs').registerLlamaDesktopIpc,
   installPreload: require('./preload.cjs'),
-  electronBuilder: require('../electron-builder.config.cjs'),
+  electronBuilder: require('../../electron-builder.config.cjs'),
 };

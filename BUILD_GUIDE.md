@@ -25,6 +25,9 @@ Complete build documentation for all four platforms: iOS, Android, Web/PWA, and 
 # Build all platforms in one command (recommended for npm release)
 ./build-variants.sh --variant minimal
 
+# Electron / desktop sidecar (Metal on macOS by default)
+./build-variants.sh --variant desktop
+
 # Or step-by-step
 npm run clean:all
 npm run build              # TypeScript
@@ -392,16 +395,48 @@ npm run build:sidecar             # auto-detect
 npm run build:sidecar:metal       # macOS
 npm run build:sidecar:linux       # Linux Vulkan
 npm run build:sidecar:win         # Windows Vulkan
+npm run build:sidecar:vulkan      # Vulkan + OpenBLAS
+npm run build:sidecar:intel       # Intel via Vulkan (alias)
 npm run build:sidecar:cuda        # CUDA
 npm run build:sidecar:rocm        # ROCm
 npm run build:sidecar:cpu         # CPU
 ```
+
+### Build via build-variants.sh (recommended for Electron)
+
+```bash
+# Mac Electron (auto Metal / metal-coreml on arm64)
+./build-variants.sh --variant desktop
+
+# Fast sidecar-only rebuild while iterating on the Electron app
+./build-variants.sh --variant desktop-only
+
+# Explicit backends
+./build-variants.sh --variant desktop --desktop-backend metal-coreml
+./build-variants.sh --variant desktop --desktop-backend cuda
+./build-variants.sh --variant desktop --desktop-backend vulkan
+./build-variants.sh --variant desktop --desktop-backend intel   # → vulkan
+./build-variants.sh --variant desktop --desktop-backend rocm
+
+# Universal Mac (arm64 + x64 sidecars)
+./build-variants.sh --variant desktop --desktop-arch=universal
+# or:
+npm run build:sidecar:universal && npm run stage:desktop
+npm run verify:desktop:bundle -- --arch=universal
+
+# Add desktop sidecar onto another variant
+./build-variants.sh --variant full --with-desktop --desktop-backend vulkan
+```
+
+`intel` is an alias for `vulkan` (Intel Arc / iGPU). A dedicated SYCL/oneAPI backend is not wired yet. CUDA and ROCm sidecars must be built on Linux/Windows hosts with the toolkit installed; set `LLAMA_CPP_UPSTREAM=/path/to/llama.cpp` when building ggml GPU plugins.
 
 ### Stage for packaging
 
 ```bash
 # Copies sidecar binary + WASM assets to extraResources/
 npm run build:desktop
+# equivalent (via variants script):
+./build-variants.sh --variant desktop
 ```
 
 ### Electron integration (3 files to add)

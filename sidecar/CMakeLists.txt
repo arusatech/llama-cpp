@@ -158,8 +158,11 @@ if(APPLE)
         ${FOUNDATION_FRAMEWORK}
         ${METALKIT_FRAMEWORK}
     )
-    if(_DESKTOP_IS_ARM64)
+    # Honor target arch (allows arm64→x86_64 cross-builds via CMAKE_OSX_ARCHITECTURES)
+    if(SIDECAR_ARCH STREQUAL "arm64")
         set_target_properties(${SIDECAR_BINARY_NAME} PROPERTIES OSX_ARCHITECTURES "arm64")
+    elseif(SIDECAR_ARCH STREQUAL "x64")
+        set_target_properties(${SIDECAR_BINARY_NAME} PROPERTIES OSX_ARCHITECTURES "x86_64")
     endif()
 endif()
 

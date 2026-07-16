@@ -584,10 +584,9 @@ void start_live_completion_stream(int64_t ctx_id, const std::string & prompt, in
 }
 
 void register_routes(httplib::Server & svr) {
-    svr.set_default_headers({{"Server", "llama-cpp-capacitor-native"},
-                             {"Access-Control-Allow-Origin", "*"},
-                             {"Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"},
-                             {"Access-Control-Allow-Headers", "Content-Type, Authorization"}});
+    // CORS is applied per-response via set_cors() — do not also put it in
+    // default headers or clients see duplicated Access-Control-Allow-Origin: *, *
+    svr.set_default_headers({{"Server", "llama-cpp-pro-native"}});
 
     svr.Options(".*", [](const httplib::Request &, httplib::Response & res) {
         set_cors(res);

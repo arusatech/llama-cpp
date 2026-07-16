@@ -28,6 +28,12 @@ const MODEL_DESC_DESKTOP = {
   isChatTemplateSupported: true,
 };
 
+/** Sidecar DELETE route is `/v1/internal/models/([^/]+)` — never use absolute paths as ids. */
+function sidecarModelIdFromPath(modelPath: string): string {
+  const base = modelPath.split(/[/\\]/).pop() || modelPath;
+  return base.replace(/\.gguf$/i, '') || base;
+}
+
 /**
  * Capacitor LlamaCpp implementation for Electron desktop.
  * Core inference (chat, completion, embeddings) uses the native GPU/CPU sidecar.
@@ -53,12 +59,13 @@ export class LlamaCppDesktop extends LlamaCppWeb {
     params: NativeContextParams & { embedding?: boolean };
   }): Promise<NativeLlamaContext> {
     const modelPath = params.model;
+    const modelId = sidecarModelIdFromPath(modelPath);
     const bridge = getDesktopBridge();
 
     if (bridge?.ensureSidecar) {
       const result = await bridge.ensureSidecar({
         modelPath,
-        modelId: params.model,
+        modelId,
         n_ctx: params.n_ctx,
         n_gpu_layers: params.n_gpu_layers,
         n_threads: params.n_threads,
@@ -67,7 +74,7 @@ export class LlamaCppDesktop extends LlamaCppWeb {
       if (result?.ok && result.port) {
         this.desktopProvider.setSidecarPort(result.port);
         await this.desktopProvider.loadModel({
-          modelId: params.model,
+          modelId,
           modelPath,
           n_ctx: params.n_ctx,
           n_gpu_layers: params.n_gpu_layers,
@@ -76,7 +83,7 @@ export class LlamaCppDesktop extends LlamaCppWeb {
         });
         this.sidecarActive = true;
         this.gpuEnabled = !!result.gpuEnabled;
-        this.contextToModel.set(contextId, params.model);
+        this.contextToModel.set(contextId, modelId);
         return {
           contextId,
           gpu: this.gpuEnabled,
@@ -115,6 +122,7 @@ export class LlamaCppDesktop extends LlamaCppWeb {
     }
     const result = await bridge.ensureSidecar({
       modelPath: options.modelPath,
+      modelId: sidecarModelIdFromPath(options.modelPath),
       host: options.host ?? '127.0.0.1',
       port: options.port,
       n_ctx: options.params?.n_ctx,

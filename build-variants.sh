@@ -1,17 +1,23 @@
 #!/bin/bash
 
 ###############################################################################
-# Build Variants Script for llama-cpp-capacitor
-# 
+# Build Variants Script for llama-cpp-capacitor / llama-cpp-pro
+#
 # Builds optimized variants for different use cases:
 # - minimal: Production npm release (~20 MB, no sources)
 # - core: Balanced (~30-35 MB, includes C++ sources)
 # - development: Full debug build (~50-60 MB, all architectures)
 # - ios-only: iOS framework only
 # - android-only: Android library only
+# - desktop: TypeScript + PWA/WASM + desktop sidecar (Electron)
+# - desktop-only: Sidecar + stage only (fast Electron iteration)
 # - full: Complete build (not recommended)
 #
-# Usage: ./build-variants.sh --variant [minimal|core|development|ios-only|android-only|full]
+# Usage:
+#   ./build-variants.sh --variant desktop
+#   ./build-variants.sh --variant desktop --desktop-backend metal-coreml
+#   ./build-variants.sh --variant full --with-desktop --desktop-backend cuda
+#   ./build-variants.sh --help
 ###############################################################################
 
 set -e
@@ -23,11 +29,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Build configuration
-VARIANT="${1##--variant }"
-if [ -z "$VARIANT" ] || [ "$VARIANT" = "--variant" ]; then
-    VARIANT="minimal"
-fi
+VARIANT="minimal"
+WITH_DESKTOP=0
+DESKTOP_BACKEND="${DESKTOP_BACKEND:-auto}"
+DESKTOP_ARCH="${DESKTOP_ARCH:-host}"
 
 # Environment overrides
 STRIP_SYMBOLS="${STRIP_SYMBOLS:-true}"
@@ -66,6 +71,123 @@ print_header() {
     echo -e "\n${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${MAGENTA}$1${NC}"
     echo -e "${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+}
+
+print_usage() {
+    cat <<'EOF'
+Usage: ./build-variants.sh [options]
+
+Options:
+  --variant <name>              Build variant (default: minimal)
+  --with-desktop                Also build + stage the desktop sidecar
+  --desktop-backend <backend>   GPU backend for sidecar (implies --with-desktop)
+  --desktop-arch <arch>         host|arm64|x64|universal (macOS; default: host)
+  -h, --help                    Show this help
+
+Variants:
+  minimal         Production (~20 MB, no sources) + PWA
+  core            Balanced (~30-35 MB, with sources) + PWA
+  development     Debug (~50-60 MB, all architectures) + PWA
+  ios-only        iOS only (~8-10 MB)
+  android-only    Android only (~25-30 MB)
+  desktop         TypeScript + PWA + desktop sidecar (Electron)
+  desktop-only    Sidecar + stage only (fast Electron rebuild)
+  full            Everything (~70+ MB, NOT recommended)
+
+Desktop backends (passed to scripts/build-sidecar.sh):
+  auto              Host default (metal-coreml/metal on macOS, vulkan-openblas on Linux)
+  metal-coreml      macOS arm64 Metal + CoreML
+  metal             macOS Metal
+  vulkan            Vulkan only
+  vulkan-openblas   Vulkan + OpenBLAS (default Linux)
+  cuda              NVIDIA CUDA
+  rocm              AMD ROCm/HIP
+  intel             Alias for vulkan (Intel Arc via Vulkan; no SYCL yet)
+  cpu               CPU only
+  openblas          CPU + OpenBLAS
+  universal         macOS only: build both darwin-arm64 + darwin-x64 (via --desktop-arch)
+
+Examples:
+  ./build-variants.sh --variant desktop
+  ./build-variants.sh --variant desktop --desktop-backend metal-coreml
+  ./build-variants.sh --variant desktop --desktop-arch=universal
+  ./build-variants.sh --variant desktop-only --desktop-arch=x64
+  ./build-variants.sh --variant desktop --desktop-backend cuda
+  ./build-variants.sh --variant desktop --desktop-backend intel
+  ./build-variants.sh --variant full --with-desktop --desktop-backend vulkan
+  ./build-variants.sh --variant desktop-only --desktop-backend cpu
+EOF
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --variant)
+                shift
+                if [ -z "${1:-}" ]; then
+                    print_error "--variant requires a value"
+                    print_usage
+                    exit 1
+                fi
+                VARIANT="$1"
+                ;;
+            --variant=*)
+                VARIANT="${1#--variant=}"
+                ;;
+            --with-desktop)
+                WITH_DESKTOP=1
+                ;;
+            --desktop-backend)
+                shift
+                if [ -z "${1:-}" ]; then
+                    print_error "--desktop-backend requires a value"
+                    print_usage
+                    exit 1
+                fi
+                DESKTOP_BACKEND="$1"
+                WITH_DESKTOP=1
+                ;;
+            --desktop-backend=*)
+                DESKTOP_BACKEND="${1#--desktop-backend=}"
+                WITH_DESKTOP=1
+                ;;
+            --desktop-arch)
+                shift
+                if [ -z "${1:-}" ]; then
+                    print_error "--desktop-arch requires host|arm64|x64|universal"
+                    print_usage
+                    exit 1
+                fi
+                DESKTOP_ARCH="$1"
+                WITH_DESKTOP=1
+                ;;
+            --desktop-arch=*)
+                DESKTOP_ARCH="${1#--desktop-arch=}"
+                WITH_DESKTOP=1
+                ;;
+            -h|--help)
+                print_usage
+                exit 0
+                ;;
+            minimal|core|development|ios-only|android-only|full|desktop|desktop-only)
+                # Legacy positional: ./build-variants.sh desktop
+                VARIANT="$1"
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                echo ""
+                print_usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    case "$VARIANT" in
+        desktop|desktop-only)
+            WITH_DESKTOP=1
+            ;;
+    esac
 }
 
 bytes_to_mb() {
@@ -324,6 +446,137 @@ build_typescript() {
     fi
 }
 
+# ============================================================================
+# Desktop / Electron sidecar
+# ============================================================================
+
+resolve_desktop_backend() {
+    local requested="${1:-auto}"
+    local resolved=""
+
+    case "$requested" in
+        auto|"")
+            case "$(uname -s)" in
+                Darwin)
+                    if [[ "$(uname -m)" == "arm64" ]]; then
+                        resolved="metal-coreml"
+                    else
+                        resolved="metal"
+                    fi
+                    ;;
+                Linux)
+                    resolved="vulkan-openblas"
+                    ;;
+                *)
+                    resolved="cpu"
+                    ;;
+            esac
+            ;;
+        intel)
+            # Intel Arc / iGPU: use Vulkan. SYCL/oneAPI is not wired in sidecar yet.
+            resolved="vulkan"
+            print_status "Desktop backend 'intel' maps to 'vulkan' (no SYCL backend yet)" >&2
+            ;;
+        metal|metal-coreml|vulkan|vulkan-openblas|cuda|rocm|cpu|openblas)
+            resolved="$requested"
+            ;;
+        metal+coreml|coreml)
+            resolved="metal-coreml"
+            ;;
+        nvidia)
+            resolved="cuda"
+            ;;
+        amd|hip)
+            resolved="rocm"
+            ;;
+        *)
+            print_error "Unknown desktop backend: $requested"
+            echo "Valid: auto metal metal-coreml vulkan vulkan-openblas cuda rocm intel cpu openblas"
+            return 1
+            ;;
+    esac
+
+    echo "$resolved"
+}
+
+build_desktop() {
+    local include_pwa="${1:-0}"
+    local backend
+
+    print_header "Building Desktop Sidecar (Electron)"
+
+    backend="$(resolve_desktop_backend "$DESKTOP_BACKEND")" || return 1
+    print_status "Desktop backend: $backend (requested: $DESKTOP_BACKEND)"
+    print_status "Desktop arch: $DESKTOP_ARCH"
+
+    if [ "$include_pwa" = "1" ]; then
+        build_pwa || print_warning "PWA build skipped"
+    fi
+
+    if [ ! -x "./scripts/build-sidecar.sh" ]; then
+        print_error "scripts/build-sidecar.sh not found or not executable"
+        return 1
+    fi
+
+    case "$DESKTOP_ARCH" in
+        universal|all)
+            if ! ./scripts/build-sidecar.sh universal; then
+                print_error "Universal sidecar build failed"
+                return 1
+            fi
+            ;;
+        host|"")
+            if ! ./scripts/build-sidecar.sh "$backend"; then
+                print_error "Sidecar build failed for backend: $backend"
+                print_warning "CUDA/ROCm must be built on Linux/Windows hosts with the toolkit installed."
+                print_warning "GPU plugins may need: LLAMA_CPP_UPSTREAM=/path/to/llama.cpp"
+                return 1
+            fi
+            ;;
+        arm64|x64)
+            if ! ./scripts/build-sidecar.sh "$backend" --arch="$DESKTOP_ARCH"; then
+                print_error "Sidecar build failed for backend=$backend arch=$DESKTOP_ARCH"
+                return 1
+            fi
+            ;;
+        *)
+            print_error "Unknown --desktop-arch: $DESKTOP_ARCH (use host|arm64|x64|universal)"
+            return 1
+            ;;
+    esac
+    print_success "Sidecar built (backend=$backend arch=$DESKTOP_ARCH)"
+
+    if ! command -v npm &> /dev/null; then
+        print_error "npm not found. Cannot stage desktop resources."
+        return 1
+    fi
+
+    if ! npm run stage:desktop; then
+        print_error "stage:desktop failed"
+        return 1
+    fi
+    print_success "Desktop resources staged to extraResources/"
+}
+
+build_desktop_variant() {
+    print_header "Building DESKTOP Variant (Electron)"
+    print_status "Contents: TypeScript + PWA/WASM + sidecar + staged extraResources"
+
+    build_typescript || print_warning "TypeScript build skipped"
+    build_desktop 1 || return 1
+
+    print_success "Desktop variant ready"
+}
+
+build_desktop_only() {
+    print_header "Building DESKTOP-ONLY Variant"
+    print_status "Contents: Sidecar + staged extraResources (no TS / no mobile)"
+
+    build_desktop 0 || return 1
+
+    print_success "Desktop-only variant ready"
+}
+
 build_minimal() {
     print_header "Building MINIMAL Variant (~25-30 MB)"
     print_status "Contents: iOS arm64 + Android arm64 + PWA/WASM, stripped, no sources"
@@ -480,11 +733,16 @@ build_full() {
 # ============================================================================
 
 main() {
-    print_header "llama-cpp-capacitor Build Variants v0.2.0"
+    parse_args "$@"
+
+    print_header "llama-cpp-pro Build Variants v0.2.0"
     
     echo "Variant: $VARIANT"
     echo "Strip symbols: $STRIP_SYMBOLS"
     echo "Build jobs: $BUILD_JOBS"
+    echo "With desktop: $WITH_DESKTOP"
+    echo "Desktop backend: $DESKTOP_BACKEND"
+    echo "Desktop arch: $DESKTOP_ARCH"
     echo ""
     
     # Validate variant
@@ -504,21 +762,29 @@ main() {
         android-only)
             build_android_only
             ;;
+        desktop)
+            build_desktop_variant
+            ;;
+        desktop-only)
+            build_desktop_only
+            ;;
         full)
             build_full
             ;;
         *)
             print_error "Unknown variant: $VARIANT"
             echo ""
-            echo "Available variants:"
-            echo "  minimal       - Production (~20 MB, no sources)"
-            echo "  core          - Balanced (~30-35 MB, with sources)"
-            echo "  development   - Debug (~50-60 MB, all architectures)"
-            echo "  ios-only      - iOS only (~8-10 MB)"
-            echo "  android-only  - Android only (~25-30 MB)"
-            echo "  full          - Everything (~70+ MB, NOT recommended)"
-            echo ""
+            print_usage
             exit 1
+            ;;
+    esac
+
+    # Optional desktop sidecar on mobile/package variants
+    case "$VARIANT" in
+        minimal|core|development|full)
+            if [ "$WITH_DESKTOP" = "1" ]; then
+                build_desktop 0 || print_warning "Desktop sidecar build failed"
+            fi
             ;;
     esac
     
@@ -530,17 +796,32 @@ main() {
     if [ -d "android/src/main/jniLibs" ]; then
         echo "Android: $(get_dir_size 'android/src/main/jniLibs')"
     fi
+    if [ -d "sidecar/bin" ]; then
+        echo "Desktop sidecar: $(get_dir_size 'sidecar/bin')"
+    fi
+    if [ -d "extraResources/sidecar" ]; then
+        echo "Staged desktop: $(get_dir_size 'extraResources/sidecar')"
+    fi
     if [ -d "cpp" ]; then
         echo "C++ Sources: $(get_dir_size 'cpp')"
     fi
     
     print_success "Build variant '$VARIANT' completed successfully!"
     echo ""
-    echo "Next steps:"
-    echo "  1. Run: npm run verify:pack:artifacts"
-    echo "  2. Run: npm pack --ignore-scripts"
-    echo "  3. Run: npm publish"
-    echo ""
+    if [ "$VARIANT" = "desktop" ] || [ "$VARIANT" = "desktop-only" ] || [ "$WITH_DESKTOP" = "1" ]; then
+        echo "Next steps (Electron):"
+        echo "  1. Point electron-builder extraResources at extraResources/"
+        echo "  2. Use: require('llama-cpp-pro/desktop') in main process"
+        echo "  3. Optional: npm run verify:desktop:bundle"
+        echo ""
+    else
+        echo "Next steps:"
+        echo "  1. Run: npm run verify:pack:artifacts"
+        echo "  2. Run: npm pack --ignore-scripts"
+        echo "  3. Run: npm publish"
+        echo "  Tip: add --with-desktop for Electron sidecar"
+        echo ""
+    fi
 }
 
 # Run main

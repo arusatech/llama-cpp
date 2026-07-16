@@ -259,13 +259,21 @@ export class DesktopProvider extends WebProvider {
       return;
     }
 
-    if (this.sidecarLoadedModels.has(opts.modelId)) {
+    const modelPath = opts.modelPath ?? opts.modelId;
+    // Never register absolute filesystem paths as sidecar ids (DELETE route is single-segment).
+    const modelId = (() => {
+      const raw = opts.modelId;
+      if (!raw.includes('/') && !raw.includes('\\')) return raw;
+      const base = raw.split(/[/\\]/).pop() || raw;
+      return base.replace(/\.gguf$/i, '') || base;
+    })();
+    if (this.sidecarLoadedModels.has(modelId)) {
       return;
     }
-
-    const modelPath = opts.modelPath ?? opts.modelId;
     const modelBytes = typeof opts.modelBytes === 'number' ? opts.modelBytes : 0;
-    const reserveBytes = typeof opts.reserveBytes === 'number' ? opts.reserveBytes : undefined;
+    // Sidecar (Metal/Accelerate) reclaims macOS inactive pages; keep a modest reserve.
+    const reserveBytes =
+      typeof opts.reserveBytes === 'number' ? opts.reserveBytes : 128 * 1024 * 1024;
     const memory = await this.getDesktopMemorySnapshot();
     if (typeof opts.availableMemoryBytes === 'number') {
       memory.freeBytes = opts.availableMemoryBytes;
@@ -273,7 +281,17 @@ export class DesktopProvider extends WebProvider {
     if (typeof opts.totalMemoryBytes === 'number') {
       memory.totalBytes = opts.totalMemoryBytes;
     }
-    this.sidecarScheduler.ensureCapacity(opts.modelId, modelBytes, memory, reserveBytes, {
+    // If host free RAM still looks absurdly low vs total (Node freemem quirk / no IPC),
+    // treat a fraction of total as available rather than blocking every load.
+    if (
+      typeof memory.totalBytes === 'number' &&
+      typeof memory.freeBytes === 'number' &&
+      memory.totalBytes > 0 &&
+      memory.freeBytes / memory.totalBytes < 0.05
+    ) {
+      memory.freeBytes = Math.floor(memory.totalBytes * 0.45);
+    }
+    this.sidecarScheduler.ensureCapacity(modelId, modelBytes, memory, reserveBytes, {
       skipWasm: true,
       loadOpts: { n_ctx: opts.n_ctx, embedding: opts.embedding },
     });
@@ -282,7 +300,7 @@ export class DesktopProvider extends WebProvider {
       '/v1/internal/models/load',
       'POST',
       {
-        model_id: opts.modelId,
+        model_id: modelId,
         path: modelPath,
         n_ctx: opts.n_ctx,
         n_gpu_layers: opts.n_gpu_layers,
@@ -292,9 +310,9 @@ export class DesktopProvider extends WebProvider {
       300000,
     );
 
-    this.sidecarLoadedModels.add(opts.modelId);
-    this.modelPaths.set(opts.modelId, modelPath);
-    this.sidecarScheduler.markLoaded(opts.modelId, modelBytes, {
+    this.sidecarLoadedModels.add(modelId);
+    this.modelPaths.set(modelId, modelPath);
+    this.sidecarScheduler.markLoaded(modelId, modelBytes, {
       n_ctx: opts.n_ctx,
       embedding: opts.embedding,
     });
@@ -305,12 +323,18 @@ export class DesktopProvider extends WebProvider {
       await super.unloadModel(modelId);
       return;
     }
-    if (!this.sidecarLoadedModels.has(modelId)) {
+    const normalized = (() => {
+      if (!modelId.includes('/') && !modelId.includes('\\')) return modelId;
+      const base = modelId.split(/[/\\]/).pop() || modelId;
+      return base.replace(/\.gguf$/i, '') || base;
+    })();
+    if (!this.sidecarLoadedModels.has(normalized) && !this.sidecarLoadedModels.has(modelId)) {
       return;
     }
+    const id = this.sidecarLoadedModels.has(normalized) ? normalized : modelId;
     try {
       await this.sidecarFetch(
-        `/v1/internal/models/${encodeURIComponent(modelId)}`,
+        `/v1/internal/models/${encodeURIComponent(id)}`,
         'DELETE',
         undefined,
         60000,
@@ -318,9 +342,11 @@ export class DesktopProvider extends WebProvider {
     } catch {
       /* model may already be gone on sidecar */
     }
+    this.sidecarLoadedModels.delete(id);
     this.sidecarLoadedModels.delete(modelId);
+    this.modelPaths.delete(id);
     this.modelPaths.delete(modelId);
-    this.sidecarScheduler.markUnloaded(modelId);
+    this.sidecarScheduler.markUnloaded(id);
   }
 
   override async generate(req: GenerateRequest): Promise<GenerateResult> {
