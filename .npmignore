@@ -28,3 +28,6 @@ rollup.config.mjs
 
 # Build artifacts that are regenerated
 # dist/ is in "files" and is built by prepublishOnly — keep it
+sidecar/build/
+sidecar/build-*/
+sidecar/bin/

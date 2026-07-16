@@ -104,6 +104,11 @@ android/Makefile
 android/build.ninja
 android/.ninja_log
 
+# Sidecar CMake trees (host + per-arch: build-arm64, build-x64, …)
+sidecar/build/
+sidecar/build-*/
+sidecar/bin/
+
 # iOS build artifacts (Frameworks/ is created by build-native.sh only - never commit)
 ios/build/
 ios/DerivedData/
