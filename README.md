@@ -1,14 +1,12 @@
 # llama-cpp-pro
 
-[![Actions Status](https://github.com/arusatech/llama-cpp-pro/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp-pro/actions)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm](https://img.shields.io/npm/v/llama-cpp-pro.svg)](https://www.npmjs.com/package/llama-cpp-pro/)
-[![Support: ANNADATA.AI](https://img.shields.io/badge/AI-ANNADATA.AI-orange.svg)](https://annadata.ai/)
-[![Principal Engineer / Architect: Mr. Yakub Mohammad](https://img.shields.io/badge/Principal%20Architect-Mr.%20Yakub%20Mohammad-blue.svg)](https://annadata.ai/)
+[Actions Status](https://github.com/arusatech/llama-cpp-pro/actions)
+[License: MIT](https://opensource.org/licenses/MIT)
+[npm](https://www.npmjs.com/package/llama-cpp-pro/)
+[Support: ANNADATA.AI](https://annadata.ai/)
+[Principal Engineer / Architect: Mr. Yakub Mohammad](https://annadata.ai/)
 
 A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
-
-
 
 [Annadata.ai](https://annadata.ai): Inference of [LLaMA](https://arxiv.org/abs/2302.13971) model in pure C/C++ used in [Annadata.ai](https://annadata.ai)
 
@@ -27,21 +25,25 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 - **Structured Output**: Generate JSON with schema validation
 - **Cross-Platform**: iOS, Android, **Web/PWA**, and **Desktop** (Windows, macOS, Linux) with native optimizations
 
+
+
 ## 📱 Platform Support
 
-| Feature | iOS | Android | Web (PWA) | Desktop |
-|---------|-----|---------|-----------|---------|
-| Text Generation | ✅ | ✅ | ✅ | ✅ |
-| Chat Conversations | ✅ | ✅ | ✅ | ✅ |
-| Streaming | ✅ | ✅ | ✅ | ✅¹ |
-| Multimodal | ✅ | ✅ | ✅² | ✅ |
-| TTS | ✅ | ✅ | ✅² | ✅ |
-| LoRA Adapters | ✅ | ✅ | ✅² | ✅ |
-| Embeddings | ✅ | ✅ | ✅ | ✅ |
-| Reranking | ✅ | ✅ | ✅³ | ✅ |
-| Session Management | ✅ | ✅ | ✅⁴ | ✅ |
-| Benchmarking | ✅ | ✅ | ✅ | ✅ |
-| GPU Acceleration | Metal | CPU/Adreno | — | Vulkan/CUDA/ROCm/Metal |
+
+| Feature            | iOS   | Android    | Web (PWA) | Desktop                |
+| ------------------ | ----- | ---------- | --------- | ---------------------- |
+| Text Generation    | ✅     | ✅          | ✅         | ✅                      |
+| Chat Conversations | ✅     | ✅          | ✅         | ✅                      |
+| Streaming          | ✅     | ✅          | ✅         | ✅¹                     |
+| Multimodal         | ✅     | ✅          | ✅²        | ✅                      |
+| TTS                | ✅     | ✅          | ✅²        | ✅                      |
+| LoRA Adapters      | ✅     | ✅          | ✅²        | ✅                      |
+| Embeddings         | ✅     | ✅          | ✅         | ✅                      |
+| Reranking          | ✅     | ✅          | ✅³        | ✅                      |
+| Session Management | ✅     | ✅          | ✅⁴        | ✅                      |
+| Benchmarking       | ✅     | ✅          | ✅         | ✅                      |
+| GPU Acceleration   | Metal | CPU/Adreno | —         | Vulkan/CUDA/ROCm/Metal |
+
 
 ¹ **Desktop:** SSE streaming from the native sidecar (`/v1/chat/completions`, `/v1/completions` with `stream: true`).  
 ² **Web:** auxiliary GGUF files must be staged in WASM VFS.  
@@ -50,8 +52,7 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 
 ---
 
-
-See [NPM_PUBLISH_GUIDE.md](NPM_PUBLISH_GUIDE.md) for 2FA/token setup and troubleshooting.
+See [README_BUILD_SYSTEM.md](README_BUILD_SYSTEM.md) for  Build - API - setup and troubleshooting.
 
 ## 🤝 Contributing
 
@@ -65,10 +66,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) - The core inference engine
 - [Capacitor](https://capacitorjs.com/) - The cross-platform runtime
-- [Annadata.ai](https://annadata.ai) - Complete system developed and powered by [![npm](https://img.shields.io/npm/v/llama-cpp-pro.svg)](https://www.npmjs.com/package/llama-cpp-pro/)
+- [Annadata.ai](https://annadata.ai) - Complete system developed and powered by [npm](https://www.npmjs.com/package/llama-cpp-pro/)
+
+
 
 ## 📞 Support
 
-- 📧 Email: support@arusatech.com ; yakub@annadata.ai
+- 📧 Email: [support@arusatech.com](mailto:support@arusatech.com) ; [yakub@annadata.ai](mailto:yakub@annadata.ai)
 - 🐛 Issues: [GitHub Issues](https://github.com/arusatech/llama-cpp-pro/issues)
 - 📖 Documentation: [GitHub Wiki](https://github.com/arusatech/llama-cpp-pro/wiki)
+
