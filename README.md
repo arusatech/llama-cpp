@@ -52,7 +52,22 @@ A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/l
 
 ---
 
-See [README_BUILD_SYSTEM.md](README_BUILD_SYSTEM.md) for  Build - API - setup and troubleshooting.
+## Builds
+
+```bash
+# iOS + Android + PWA (npm release / Capacitor)
+./build-variants.sh --variant minimal
+
+# iOS only / Android only
+./build-variants.sh --variant ios-only
+./build-variants.sh --variant android-only
+
+# Desktop / Electron (macOS universal sidecar: arm64 + x64)
+./build-variants.sh --variant desktop
+./build-variants.sh --variant minimal --with-desktop --desktop-arch=universal
+```
+
+See [BUILD_GUIDE.md](BUILD_GUIDE.md) and [README_BUILD_SYSTEM.md](README_BUILD_SYSTEM.md) for full build, API, and troubleshooting details.
 
 ## 🤝 Contributing
 
