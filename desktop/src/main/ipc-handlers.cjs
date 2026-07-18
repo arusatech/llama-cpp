@@ -23,6 +23,7 @@ const CHANNEL_STOP = 'llama-desktop:stop-sidecar';
 const CHANNEL_STATUS = 'llama-desktop:sidecar-status';
 const CHANNEL_BACKEND = 'llama-desktop:backend-status';
 const CHANNEL_OVERRIDE = 'llama-desktop:set-backend-override';
+const CHANNEL_GET_OVERRIDE = 'llama-desktop:get-backend-override';
 const CHANNEL_MEMORY = 'llama-desktop:memory-snapshot';
 
 /**
@@ -95,6 +96,7 @@ function registerLlamaDesktopIpc(opts) {
     CHANNEL_STATUS,
     CHANNEL_BACKEND,
     CHANNEL_OVERRIDE,
+    CHANNEL_GET_OVERRIDE,
     CHANNEL_MEMORY,
   ]) {
     try {
@@ -169,6 +171,11 @@ function registerLlamaDesktopIpc(opts) {
     return { ok: true };
   });
 
+  ipcMain.handle(CHANNEL_GET_OVERRIDE, async () => {
+    const value = getUserOverride(opts && opts.deps);
+    return value || 'auto';
+  });
+
   ipcMain.handle(CHANNEL_MEMORY, async () => {
     const totalBytes = os.totalmem();
     const freeBytes = getAvailableSystemBytes(totalBytes);
@@ -196,6 +203,7 @@ function registerLlamaDesktopIpc(opts) {
       CHANNEL_STATUS,
       CHANNEL_BACKEND,
       CHANNEL_OVERRIDE,
+      CHANNEL_GET_OVERRIDE,
       CHANNEL_MEMORY,
     },
   };

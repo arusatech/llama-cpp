@@ -16,6 +16,7 @@ function installLlamaDesktopPreload(contextBridge, ipcRenderer) {
   getSidecarStatus: () => ipcRenderer.invoke('llama-desktop:sidecar-status'),
   getBackendStatus: () => ipcRenderer.invoke('llama-desktop:backend-status'),
   setBackendOverride: (value) => ipcRenderer.invoke('llama-desktop:set-backend-override', value),
+  getBackendOverride: () => ipcRenderer.invoke('llama-desktop:get-backend-override'),
   getMemorySnapshot: () => ipcRenderer.invoke('llama-desktop:memory-snapshot'),
 };
 
