@@ -109,6 +109,18 @@ sidecar/build/
 sidecar/build-*/
 sidecar/bin/
 
+# Prebuilt desktop sidecars (rebuild with npm run build:sidecar / stage:desktop)
+# Keep extraResources/sidecar/README.md tracked.
+extraResources/sidecar/darwin-*
+extraResources/sidecar/linux-*
+extraResources/sidecar/win32-*
+extraResources/sidecar/ggml-plugins/
+extraResources/sidecar/runtime-libs/
+extraResources/sidecar/*.so
+extraResources/sidecar/*.dylib
+extraResources/sidecar/*.dll
+extraResources/sidecar/*.exe
+
 # iOS build artifacts (Frameworks/ is created by build-native.sh only - never commit)
 ios/build/
 ios/DerivedData/

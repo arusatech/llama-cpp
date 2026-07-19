@@ -56,7 +56,7 @@ const requiredArtifacts = [
     reason: 'TypeScript ESM plugin entry',
   },
   {
-    path: 'dist/plugin.cjs.js',
+    path: 'dist/plugin.cjs',
     reason: 'TypeScript CJS plugin entry',
   },
   {
