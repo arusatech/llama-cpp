@@ -1,6 +1,6 @@
 {
   "name": "llama-cpp-pro",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Run llama.cpp offline in Capacitor apps — GGUF LLMs on iOS, Android, Web/PWA, and Electron with chat, embeddings, multimodal, TTS, and LoRA.",
   "main": "dist/plugin.cjs",
   "type": "module",
