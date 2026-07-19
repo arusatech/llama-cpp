@@ -1,10 +1,10 @@
 # llama-cpp-pro
 
-[Actions Status](https://github.com/arusatech/llama-cpp-pro/actions)
-[License: MIT](https://opensource.org/licenses/MIT)
-[npm](https://www.npmjs.com/package/llama-cpp-pro/)
-[Support: ANNADATA.AI](https://annadata.ai/)
-[Principal Engineer / Architect: Mr. Yakub Mohammad](https://annadata.ai/)
+[![Actions Status](https://github.com/arusatech/llama-cpp-pro/workflows/CI/badge.svg)](https://github.com/arusatech/llama-cpp-pro/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![npm](https://img.shields.io/npm/v/llama-cpp-pro.svg)](https://www.npmjs.com/package/llama-cpp-pro/)
+[![Support: ANNADATA.AI](https://img.shields.io/badge/AI-ANNADATA.AI-orange.svg)](https://annadata.ai/)
+[![Principal Engineer / Architect: Mr. Yakub Mohammad](https://img.shields.io/badge/Principal%20Architect-Mr.%20Yakub%20Mohammad-blue.svg)](https://annadata.ai/)
 
 A native Capacitor plugin that embeds [llama.cpp](https://github.com/ggerganov/llama.cpp) directly into mobile apps, enabling offline AI inference with comprehensive support for text generation, multimodal processing, TTS, LoRA adapters, and more.
 
