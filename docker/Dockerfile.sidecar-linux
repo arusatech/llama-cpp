@@ -1,0 +1,63 @@
+# Build Linux desktop sidecar (+ optional ggml-vulkan) for llama-cpp-pro.
+# Base: ubuntu:noble-20260610  →  docker pull ubuntu:noble-20260610
+#
+# scripts\build-sidecar-linux-docker.bat
+
+FROM ubuntu:noble-20260610
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    curl \
+    ca-certificates \
+    pkg-config \
+    libopenblas-dev \
+    libvulkan-dev \
+    vulkan-tools \
+    glslang-tools \
+    spirv-tools \
+    glslc \
+    python3 \
+    nodejs \
+    npm \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+# llama.cpp ggml-vulkan requires SPIRV-Headers CMake package (not provided by apt spirv-headers).
+RUN git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers \
+    && cmake -S /tmp/SPIRV-Headers -B /tmp/SPIRV-Headers/build -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build /tmp/SPIRV-Headers/build --target install \
+    && rm -rf /tmp/SPIRV-Headers
+
+WORKDIR /src
+
+ENV LLAMA_CPP_UPSTREAM=/llama.cpp
+ENV OPENBLAS_ROOT=/usr
+ENV CMAKE_PREFIX_PATH=/usr/local
+
+CMD ["bash", "-lc", "\
+  set -euo pipefail; \
+  echo \"[docker-linux] building sidecar in $(pwd)\"; \
+  if [[ ! -f package.json ]]; then echo 'Mount llama-cpp-pro at /src'; exit 1; fi; \
+  find scripts -maxdepth 1 -name '*.sh' -print0 | xargs -0 sed -i 's/\\r$//' || true; \
+  if [[ -d /llama.cpp/ggml ]]; then export LLAMA_CPP_UPSTREAM=/llama.cpp; echo \"LLAMA_CPP_UPSTREAM=$LLAMA_CPP_UPSTREAM\"; \
+  else echo 'WARNING: /llama.cpp not mounted — building without ggml-vulkan plugin'; unset LLAMA_CPP_UPSTREAM || true; fi; \
+  rm -rf sidecar/build sidecar/build-x64 sidecar/build-arm64; \
+  bash ./scripts/build-sidecar.sh vulkan-openblas; \
+  mkdir -p sidecar/bin/ggml-plugins/linux-x64; \
+  for d in sidecar/build sidecar/build-x64; do \
+    if [[ -d \"$d/ggml-plugins\" ]]; then cp -f \"$d\"/ggml-plugins/* sidecar/bin/ggml-plugins/linux-x64/ || true; fi; \
+  done; \
+  find sidecar/build sidecar/build-x64 -type f \\( -name 'libggml-vulkan.so*' -o -name 'ggml-vulkan.so*' \\) 2>/dev/null | while read -r f; do \
+    cp -f \"$f\" sidecar/bin/ggml-plugins/linux-x64/ || true; \
+    cp -f \"$f\" sidecar/bin/ || true; \
+  done; \
+  node ./scripts/stage-desktop-resources.cjs --platform=linux; \
+  node ./scripts/ensure-desktop-sidecar-bundle.cjs --platform=linux; \
+  ls -la extraResources/sidecar/; \
+  ls -la extraResources/sidecar/ggml-plugins/linux-x64/ 2>/dev/null || true; \
+  echo '[docker-linux] done'; \
+"]

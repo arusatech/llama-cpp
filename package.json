@@ -1,6 +1,6 @@
 {
   "name": "llama-cpp-pro",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Run llama.cpp offline in Capacitor apps — GGUF LLMs on iOS, Android, Web/PWA, and Electron with chat, embeddings, multimodal, TTS, and LoRA.",
   "main": "dist/plugin.cjs",
   "type": "module",
@@ -161,6 +161,7 @@
     "build:sidecar:metal": "./scripts/build-sidecar.sh metal-coreml",
     "build:sidecar:cpu": "./scripts/build-sidecar.sh cpu",
     "build:sidecar:linux": "bash ./scripts/build-sidecar-linux.sh",
+    "build:sidecar:linux:docker": "scripts\\build-sidecar-linux-docker.bat",
     "build:sidecar:win": "scripts\\build-sidecar-win.bat",
     "build:sidecar:cuda": "./scripts/build-sidecar.sh cuda",
     "build:sidecar:rocm": "./scripts/build-sidecar.sh rocm",
@@ -202,6 +203,8 @@
     "clean:all": "npm run clean && npm run clean:native && npm run clean:wasm",
     "clean:test": "rimraf test/output test/coverage",
     "watch": "tsc --watch",
+    "release:assemble": "node ./scripts/assemble-npm-release.mjs --bump",
+    "release:publish": "node ./scripts/assemble-npm-release.mjs --bump --publish",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

@@ -1,0 +1,1365 @@
+import Foundation
+import Capacitor
+
+// MARK: - Numeric clamping helper (used by decodeAudioTokens)
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        return min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+// MARK: - Native Library Integration
+
+private enum LibraryLoader {
+    /// dlopen must target the framework Mach-O (`llama-cpp.framework/llama-cpp`), not the `.framework` directory.
+    static var llamaLibrary: UnsafeMutableRawPointer? = {
+        let fm = FileManager.default
+        var candidates: [String] = []
+        if let fw = Bundle.main.path(forResource: "llama-cpp", ofType: "framework") {
+            candidates.append((fw as NSString).appendingPathComponent("llama-cpp"))
+        }
+        if let exec = Bundle.main.executablePath {
+            let frameworks = (exec as NSString).deletingLastPathComponent + "/Frameworks/llama-cpp.framework/llama-cpp"
+            candidates.append(frameworks)
+        }
+        for path in candidates where fm.fileExists(atPath: path) {
+            guard let handle = dlopen(path, RTLD_NOW) else {
+                print("[LlamaCpp] dlopen failed for \(path): \(String(cString: dlerror()))")
+                continue
+            }
+            return handle
+        }
+        print("[LlamaCpp] llama-cpp framework binary not found; tried: \(candidates)")
+        return nil
+    }()
+}
+
+private var llamaLibrary: UnsafeMutableRawPointer? { LibraryLoader.llamaLibrary }
+
+private typealias NativeInitContext = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int64
+private typealias NativeReleaseContext = @convention(c) (Int64) -> Void
+private typealias NativeCompletion = @convention(c) (Int64, UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeGetContextModelJson = @convention(c) (Int64) -> UnsafePointer<CChar>?
+private typealias NativeContextNEmbd = @convention(c) (Int64) -> Int32
+private typealias NativeGetFormattedChat = @convention(c) (Int64, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeToggleLog = @convention(c) (Bool) -> Bool
+private typealias NativeEmbedding = @convention(c) (Int64, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafePointer<Float>?
+private typealias NativeRegisterEmb = @convention(c) (Int64, UnsafeMutableRawPointer?) -> Void
+private typealias NativeUnregisterEmb = @convention(c) (Int64) -> Void
+private typealias NativeModelInfo = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeTokenize = @convention(c) (Int64, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeDetokenize = @convention(c) (Int64, UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeGrammar = @convention(c) (UnsafePointer<CChar>?) -> UnsafePointer<CChar>?
+private typealias NativeCapServerStart = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32, UnsafePointer<CChar>?) -> Int32
+private typealias NativeCapServerStop = @convention(c) () -> Void
+private typealias NativeCapServerIsRunning = @convention(c) () -> Int32
+
+private var initContextFunc: NativeInitContext?
+private var releaseContextFunc: NativeReleaseContext?
+private var completionFunc: NativeCompletion?
+private var getContextModelJsonFunc: NativeGetContextModelJson?
+private var contextNEmbdFunc: NativeContextNEmbd?
+private var stopCompletionFunc: NativeReleaseContext?
+private var getFormattedChatFunc: NativeGetFormattedChat?
+private var toggleNativeLogFunc: NativeToggleLog?
+private var embeddingFunc: NativeEmbedding?
+private var registerEmbeddingContextFunc: NativeRegisterEmb?
+private var unregisterEmbeddingContextFunc: NativeUnregisterEmb?
+private var modelInfoFunc: NativeModelInfo?
+private var tokenizeFunc: NativeTokenize?
+private var detokenizeFunc: NativeDetokenize?
+private var grammarFunc: NativeGrammar?
+private var capServerStartFunc: NativeCapServerStart?
+private var capServerStopFunc: NativeCapServerStop?
+private var capServerIsRunningFunc: NativeCapServerIsRunning?
+
+private func loadFunctionPointers() {
+    guard let library = llamaLibrary else { return }
+    func sym<T>(_ name: String, _ type: T.Type) -> T? {
+        guard let p = dlsym(library, name) else { return nil }
+        return unsafeBitCast(p, to: T.self)
+    }
+    initContextFunc = sym("llama_init_context", NativeInitContext.self)
+    releaseContextFunc = sym("llama_release_context", NativeReleaseContext.self)
+    completionFunc = sym("llama_completion", NativeCompletion.self)
+    getContextModelJsonFunc = sym("llama_get_context_model_json", NativeGetContextModelJson.self)
+    contextNEmbdFunc = sym("llama_context_n_embd", NativeContextNEmbd.self)
+    stopCompletionFunc = sym("llama_stop_completion", NativeReleaseContext.self)
+    getFormattedChatFunc = sym("llama_get_formatted_chat", NativeGetFormattedChat.self)
+    toggleNativeLogFunc = sym("llama_toggle_native_log", NativeToggleLog.self)
+    embeddingFunc = sym("llama_embedding", NativeEmbedding.self)
+    registerEmbeddingContextFunc = sym("llama_embedding_register_context", NativeRegisterEmb.self)
+    unregisterEmbeddingContextFunc = sym("llama_embedding_unregister_context", NativeUnregisterEmb.self)
+    modelInfoFunc = sym("llama_model_info", NativeModelInfo.self)
+    tokenizeFunc = sym("llama_cap_tokenize", NativeTokenize.self)
+    detokenizeFunc = sym("llama_cap_detokenize", NativeDetokenize.self)
+    grammarFunc = sym("llama_convert_json_schema_to_grammar", NativeGrammar.self)
+    capServerStartFunc = sym("cap_llama_server_start", NativeCapServerStart.self)
+    capServerStopFunc = sym("cap_llama_server_stop", NativeCapServerStop.self)
+    capServerIsRunningFunc = sym("cap_llama_server_is_running", NativeCapServerIsRunning.self)
+}
+
+private func jsonObject(fromCString p: UnsafePointer<CChar>?) -> [String: Any]? {
+    guard let p = p else { return nil }
+    let s = String(cString: p)
+    guard let d = s.data(using: .utf8),
+          let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+    return obj
+}
+
+// MARK: - Result Types
+typealias LlamaResult<T> = Result<T, LlamaError>
+
+enum LlamaError: Error, LocalizedError {
+    case contextNotFound
+    case modelNotFound
+    case invalidParameters
+    case operationFailed(String)
+    case notImplemented
+    
+    var errorDescription: String? {
+        switch self {
+        case .contextNotFound:
+            return "Context not found"
+        case .modelNotFound:
+            return "Model not found"
+        case .invalidParameters:
+            return "Invalid parameters"
+        case .operationFailed(let message):
+            return "Operation failed: \(message)"
+        case .notImplemented:
+            return "Operation not implemented"
+        }
+    }
+}
+
+// MARK: - Context Management
+class LlamaContext {
+    let id: Int
+    var model: LlamaModel?
+    var isMultimodalEnabled: Bool = false
+    var isVocoderEnabled: Bool = false
+    
+    init(id: Int) {
+        self.id = id
+    }
+}
+
+class LlamaModel {
+    let path: String
+    var desc: String
+    var size: Int
+    var nEmbd: Int
+    var nParams: Int
+    var chatTemplates: ChatTemplates
+    var metadata: [String: Any]
+    
+    init(path: String, desc: String, size: Int, nEmbd: Int, nParams: Int, chatTemplates: ChatTemplates, metadata: [String: Any]) {
+        self.path = path
+        self.desc = desc
+        self.size = size
+        self.nEmbd = nEmbd
+        self.nParams = nParams
+        self.chatTemplates = chatTemplates
+        self.metadata = metadata
+    }
+}
+
+struct ChatTemplates {
+    let llamaChat: Bool
+    let minja: MinjaTemplates
+    
+    init(llamaChat: Bool, minja: MinjaTemplates) {
+        self.llamaChat = llamaChat
+        self.minja = minja
+    }
+}
+
+struct MinjaTemplates {
+    let `default`: Bool
+    let defaultCaps: MinjaCaps
+    let toolUse: Bool
+    let toolUseCaps: MinjaCaps
+    
+    init(default: Bool, defaultCaps: MinjaCaps, toolUse: Bool, toolUseCaps: MinjaCaps) {
+        self.default = `default`
+        self.defaultCaps = defaultCaps
+        self.toolUse = toolUse
+        self.toolUseCaps = toolUseCaps
+    }
+}
+
+struct MinjaCaps {
+    let tools: Bool
+    let toolCalls: Bool
+    let toolResponses: Bool
+    let systemRole: Bool
+    let parallelToolCalls: Bool
+    let toolCallId: Bool
+    
+    init(tools: Bool, toolCalls: Bool, toolResponses: Bool, systemRole: Bool, parallelToolCalls: Bool, toolCallId: Bool) {
+        self.tools = tools
+        self.toolCalls = toolCalls
+        self.toolResponses = toolResponses
+        self.systemRole = systemRole
+        self.parallelToolCalls = parallelToolCalls
+        self.toolCallId = toolCallId
+    }
+}
+
+// MARK: - Main Implementation
+@objc public class LlamaCpp: NSObject {
+    private var contexts: [Int: LlamaContext] = [:]
+    private var nativeContexts: [Int64: UnsafeMutableRawPointer] = [:]
+    private var contextIdToNative: [Int: Int64] = [:]
+    private var contextCounter: Int = 0
+    // Default aligned with the isomorphic limit (parity with WASM_MAX_CONCURRENT_MODELS = 5).
+    private var contextLimit: Int = ModelAdmissionController.maxConcurrentModels
+    private var nativeLogEnabled: Bool = false
+    // Memory admission control (parity with the Web DefaultModelScheduler).
+    private let admissionController = ModelAdmissionController()
+
+    private func defaultMinjaCaps() -> MinjaCaps {
+        MinjaCaps(
+            tools: true,
+            toolCalls: true,
+            toolResponses: true,
+            systemRole: true,
+            parallelToolCalls: true,
+            toolCallId: true
+        )
+    }
+
+    private func applyModelMetadata(_ model: inout LlamaModel, from m: [String: Any], defaultCaps: MinjaCaps) {
+        model.desc = (m["desc"] as? String) ?? model.desc
+        if let n = m["size"] as? NSNumber { model.size = n.intValue }
+        if let n = m["nEmbd"] as? NSNumber { model.nEmbd = n.intValue }
+        if let n = m["nParams"] as? NSNumber { model.nParams = n.intValue }
+        if let meta = m["metadata"] as? [String: Any] { model.metadata = meta }
+        if let ct = m["chatTemplates"] as? [String: Any] {
+            let llamaChat = (ct["llamaChat"] as? NSNumber)?.boolValue ?? true
+            if let minja = ct["minja"] as? [String: Any] {
+                func caps(_ d: [String: Any]?) -> MinjaCaps {
+                    guard let d = d else { return defaultCaps }
+                    return MinjaCaps(
+                        tools: (d["tools"] as? NSNumber)?.boolValue ?? true,
+                        toolCalls: (d["toolCalls"] as? NSNumber)?.boolValue ?? true,
+                        toolResponses: (d["toolResponses"] as? NSNumber)?.boolValue ?? true,
+                        systemRole: (d["systemRole"] as? NSNumber)?.boolValue ?? true,
+                        parallelToolCalls: (d["parallelToolCalls"] as? NSNumber)?.boolValue ?? true,
+                        toolCallId: (d["toolCallId"] as? NSNumber)?.boolValue ?? true
+                    )
+                }
+                let defCaps = caps(minja["defaultCaps"] as? [String: Any])
+                let tuCaps = caps(minja["toolUseCaps"] as? [String: Any])
+                model.chatTemplates = ChatTemplates(
+                    llamaChat: llamaChat,
+                    minja: MinjaTemplates(
+                        default: (minja["default"] as? NSNumber)?.boolValue ?? true,
+                        defaultCaps: defCaps,
+                        toolUse: (minja["toolUse"] as? NSNumber)?.boolValue ?? true,
+                        toolUseCaps: tuCaps
+                    )
+                )
+            }
+        }
+    }
+
+    /// Query n_embd from native at init or embed time (Android JNI does this inline).
+    private func resolveEmbeddingDimension(context: LlamaContext, nativeId: Int64) -> Int {
+        if let cached = context.model?.nEmbd, cached > 0 {
+            return cached
+        }
+        if getContextModelJsonFunc == nil || contextNEmbdFunc == nil {
+            loadFunctionPointers()
+        }
+        if let jsonFn = getContextModelJsonFunc, let c = jsonFn(nativeId), let m = jsonObject(fromCString: c) {
+            if var model = context.model {
+                applyModelMetadata(&model, from: m, defaultCaps: defaultMinjaCaps())
+                context.model = model
+                if model.nEmbd > 0 {
+                    return model.nEmbd
+                }
+            }
+        }
+        if let nEmbdFn = contextNEmbdFunc {
+            let n = Int(nEmbdFn(nativeId))
+            if n > 0 {
+                if var model = context.model {
+                    model.nEmbd = n
+                    context.model = model
+                }
+                return n
+            }
+        }
+        return 0
+    }
+    
+    // MARK: - Core initialization and management
+    
+    func toggleNativeLog(enabled: Bool, completion: @escaping (LlamaResult<Void>) -> Void) {
+        nativeLogEnabled = enabled
+        if initContextFunc == nil { loadFunctionPointers() }
+        if let fn = toggleNativeLogFunc {
+            _ = fn(enabled)
+        }
+        if enabled {
+            print("[LlamaCpp] Native logging enabled")
+        } else {
+            print("[LlamaCpp] Native logging disabled")
+        }
+        completion(.success(()))
+    }
+    
+    func setContextLimit(limit: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        let maxAllowed = admissionController.maxModelCount
+        guard limit >= 1 else {
+            completion(.failure(.operationFailed("Context limit must be at least 1")))
+            return
+        }
+        if limit > maxAllowed {
+            // Clamp to the isomorphic hard cap rather than silently over-committing memory.
+            print("[LlamaCpp] Requested context limit \(limit) exceeds max \(maxAllowed); clamping to \(maxAllowed)")
+            contextLimit = maxAllowed
+        } else {
+            contextLimit = limit
+        }
+        print("[LlamaCpp] Context limit set to \(contextLimit)")
+        completion(.success(()))
+    }
+    
+    func modelInfo(path: String, skip: [String], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        if modelInfoFunc == nil { loadFunctionPointers() }
+        guard let fn = modelInfoFunc else {
+            completion(.failure(.operationFailed("llama_model_info not found")))
+            return
+        }
+        var skipJson = "[]"
+        if !skip.isEmpty, let d = try? JSONSerialization.data(withJSONObject: skip), let s = String(data: d, encoding: .utf8) {
+            skipJson = s
+        }
+        let result: LlamaResult<[String: Any]> = path.withCString { pathPtr in
+            skipJson.withCString { skipPtr in
+                guard let c = fn(pathPtr, skipPtr), let dict = jsonObject(fromCString: c) else {
+                    return .failure(.operationFailed("model info failed"))
+                }
+                if let err = dict["error"] as? String {
+                    return .failure(.operationFailed(err))
+                }
+                return .success(dict)
+            }
+        }
+        completion(result)
+    }
+    
+    func initContext(contextId: Int, params: [String: Any], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        // Extract parameters
+        guard let modelPath = params["model"] as? String else {
+            completion(.failure(.invalidParameters))
+            return
+        }
+
+        // Memory admission control: enforce the concurrent-model slot limit AND a
+        // process-memory guard before touching native code (parity with the Web path).
+        let embedding = (params["embedding"] as? Bool) ?? false
+        let decision = admissionController.canAdmit(
+            currentlyLoaded: contexts.count,
+            modelPath: modelPath,
+            embedding: embedding
+        )
+        if !decision.allow {
+            let prefix = decision.deniedBy == .limit ? "MODEL_LIMIT_REACHED: " : "INSUFFICIENT_MEMORY: "
+            let reason = decision.reason ?? "Model admission rejected"
+            print("[LlamaCpp] Admission rejected for context \(contextId) — \(reason)")
+            completion(.failure(.operationFailed(prefix + reason)))
+            return
+        }
+        
+        // Create context
+        let context = LlamaContext(id: contextId)
+        
+        let defaultCaps = defaultMinjaCaps()
+        let defaultTemplates = ChatTemplates(
+            llamaChat: true,
+            minja: MinjaTemplates(
+                default: true,
+                defaultCaps: defaultCaps,
+                toolUse: true,
+                toolUseCaps: defaultCaps
+            )
+        )
+        
+        var model = LlamaModel(
+            path: modelPath,
+            desc: "model",
+            size: 0,
+            nEmbd: 0,
+            nParams: 0,
+            chatTemplates: defaultTemplates,
+            metadata: [:]
+        )
+        
+        context.model = model
+        
+        var paramsJson = "{}"
+        do {
+            let paramsData = try JSONSerialization.data(withJSONObject: params)
+            paramsJson = String(data: paramsData, encoding: .utf8) ?? "{}"
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize params: \(error.localizedDescription)")))
+            return
+        }
+        
+        if initContextFunc == nil {
+            loadFunctionPointers()
+        }
+        
+        let nativeContextId: Int64
+        do {
+            nativeContextId = try LlamaNativeBridge.initContext(modelPath: modelPath, paramsJson: paramsJson)
+        } catch let error as LlamaNativeBridge.Failure {
+            completion(.failure(.operationFailed(error.localizedDescription)))
+            return
+        } catch {
+            completion(.failure(.operationFailed("Native initContext failed: \(error.localizedDescription)")))
+            return
+        }
+        
+        guard nativeContextId > 0 else {
+            completion(.failure(.operationFailed("Failed to initialize native context")))
+            return
+        }
+        
+        contexts[contextId] = context
+        nativeContexts[nativeContextId] = UnsafeMutableRawPointer(bitPattern: Int(truncatingIfNeeded: nativeContextId))
+        contextIdToNative[contextId] = nativeContextId
+        
+        if let jsonFn = getContextModelJsonFunc, let c = jsonFn(nativeContextId), let m = jsonObject(fromCString: c) {
+            applyModelMetadata(&model, from: m, defaultCaps: defaultCaps)
+            context.model = model
+        }
+        if model.nEmbd <= 0 {
+            _ = resolveEmbeddingDimension(context: context, nativeId: nativeContextId)
+            if let refreshed = context.model {
+                model = refreshed
+            }
+        }
+        
+        // Query GPU info from native layer
+        let gpuInfo = LlamaNativeBridge.queryGpuInfo(nativeContextId)
+        let gpuEnabled = gpuInfo.gpu
+        let reasonNoGPU = gpuEnabled ? "" : (gpuInfo.reason.isEmpty ? "Metal not used" : gpuInfo.reason)
+
+        // Return context info — reflect actual GPU state
+        let contextInfo: [String: Any] = [
+            "contextId": contextId,
+            "gpu": gpuEnabled,
+            "reasonNoGPU": reasonNoGPU,
+            "model": [
+                "desc": model.desc,
+                "size": model.size,
+                "nEmbd": model.nEmbd,
+                "nParams": model.nParams,
+                "chatTemplates": [
+                    "llamaChat": model.chatTemplates.llamaChat,
+                    "minja": [
+                        "default": model.chatTemplates.minja.default,
+                        "defaultCaps": [
+                            "tools": model.chatTemplates.minja.defaultCaps.tools,
+                            "toolCalls": model.chatTemplates.minja.defaultCaps.toolCalls,
+                            "toolResponses": model.chatTemplates.minja.defaultCaps.toolResponses,
+                            "systemRole": model.chatTemplates.minja.defaultCaps.systemRole,
+                            "parallelToolCalls": model.chatTemplates.minja.defaultCaps.parallelToolCalls,
+                            "toolCallId": model.chatTemplates.minja.defaultCaps.toolCallId
+                        ],
+                        "toolUse": model.chatTemplates.minja.toolUse,
+                        "toolUseCaps": [
+                            "tools": model.chatTemplates.minja.toolUseCaps.tools,
+                            "toolCalls": model.chatTemplates.minja.toolUseCaps.toolCalls,
+                            "toolResponses": model.chatTemplates.minja.toolUseCaps.toolResponses,
+                            "systemRole": model.chatTemplates.minja.toolUseCaps.systemRole,
+                            "parallelToolCalls": model.chatTemplates.minja.toolUseCaps.parallelToolCalls,
+                            "toolCallId": model.chatTemplates.minja.toolUseCaps.toolCallId
+                        ]
+                    ]
+                ],
+                "metadata": model.metadata,
+                "isChatTemplateSupported": true
+            ]
+        ]
+        
+        completion(.success(contextInfo))
+    }
+    
+    func releaseContext(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        
+        let nativeId = contextIdToNative[contextId] ?? Int64(contextId)
+        
+        LlamaNativeBridge.releaseContext(nativeId)
+        
+        contexts.removeValue(forKey: contextId)
+        nativeContexts.removeValue(forKey: nativeId)
+        contextIdToNative.removeValue(forKey: contextId)
+        completion(.success(()))
+    }
+    
+    func releaseAllContexts(completion: @escaping (LlamaResult<Void>) -> Void) {
+        let pairs = Array(contextIdToNative)
+        for (_, nativeId) in pairs {
+            LlamaNativeBridge.releaseContext(nativeId)
+        }
+        contexts.removeAll()
+        nativeContexts.removeAll()
+        contextIdToNative.removeAll()
+        completion(.success(()))
+    }
+    
+    // MARK: - Chat and completion
+    
+    func getFormattedChat(contextId: Int, messages: String, chatTemplate: String?, params: [String: Any]?, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        if getFormattedChatFunc == nil { loadFunctionPointers() }
+        guard let fn = getFormattedChatFunc else {
+            completion(.failure(.operationFailed("llama_get_formatted_chat not found")))
+            return
+        }
+        var paramsJson = "{}"
+        if let p = params, let d = try? JSONSerialization.data(withJSONObject: p), let s = String(data: d, encoding: .utf8) {
+            paramsJson = s
+        }
+        let template = chatTemplate ?? ""
+        let result: LlamaResult<[String: Any]> = messages.withCString { msgPtr in
+            template.withCString { tplPtr in
+                paramsJson.withCString { parPtr in
+                    guard let c = fn(nativeId, msgPtr, tplPtr, parPtr), let dict = jsonObject(fromCString: c) else {
+                        return .failure(.operationFailed("formatted chat failed"))
+                    }
+                    if let err = dict["error"] as? String {
+                        return .failure(.operationFailed(err))
+                    }
+                    return .success(dict)
+                }
+            }
+        }
+        completion(result)
+    }
+    
+    func completion(contextId: Int, params: [String: Any], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+
+        let nativeId = contextIdToNative[contextId] ?? Int64(contextId)
+        var paramsJson = "{}"
+        do {
+            let paramsData = try JSONSerialization.data(withJSONObject: params)
+            paramsJson = String(data: paramsData, encoding: .utf8) ?? "{}"
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize params: \(error.localizedDescription)")))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let completionResult = try LlamaNativeBridge.runCompletion(contextId: nativeId, paramsJson: paramsJson)
+                completion(.success(completionResult))
+            } catch let error as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(error.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("Native completion failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+    
+    func stopCompletion(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+
+        let nativeId = contextIdToNative[contextId] ?? Int64(contextId)
+        LlamaNativeBridge.stopCompletion(nativeId)
+        completion(.success(()))
+    }
+    
+    // MARK: - Chat-first methods (like llama-cli -sys)
+    
+    func chat(contextId: Int, messages: [JSObject], system: String?, chatTemplate: String?, params: [String: Any]?, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        
+        do {
+            // Convert JSObject messages to JSON string
+            let messagesData = try JSONSerialization.data(withJSONObject: messages)
+            let messagesJson = String(data: messagesData, encoding: .utf8) ?? "[]"
+            
+            // Add system message if provided
+            var allMessages = messages
+            if let system = system, !system.isEmpty {
+                let systemMessage: [String: Any] = [
+                    "role": "system",
+                    "content": system
+                ]
+                let jsSystem = JSTypes.coerceDictionaryToJSObject(systemMessage) ?? [:]
+                allMessages.insert(jsSystem, at: 0)
+            }
+            
+            // Convert to JSON string for getFormattedChat
+            let allMessagesData = try JSONSerialization.data(withJSONObject: allMessages)
+            let allMessagesJson = String(data: allMessagesData, encoding: .utf8) ?? "[]"
+            
+            // First, format the chat
+            getFormattedChat(contextId: contextId, messages: allMessagesJson, chatTemplate: chatTemplate, params: nil) { [weak self] result in
+                switch result {
+                case .success(let formattedResult):
+                    // Extract the formatted prompt
+                    let formattedPrompt = formattedResult["prompt"] as? String ?? ""
+                    
+                    // Create completion parameters
+                    var completionParams = params ?? [:]
+                    completionParams["prompt"] = formattedPrompt
+                    
+                    // Call completion with formatted prompt
+                    self?.completion(contextId: contextId, params: completionParams, completion: completion)
+                    
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+            
+        } catch {
+            completion(.failure(.contextNotFound)) // Use a more appropriate error
+        }
+    }
+    
+    func chatWithSystem(contextId: Int, system: String, message: String, params: [String: Any]?, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        // Create a simple message array
+        let userMessage: [String: Any] = [
+            "role": "user",
+            "content": message
+        ]
+        let jsUser = JSTypes.coerceDictionaryToJSObject(userMessage) ?? [:]
+        let messages: [JSObject] = [jsUser]
+        
+        // Call the main chat method
+        chat(contextId: contextId, messages: messages, system: system, chatTemplate: nil, params: params, completion: completion)
+    }
+    
+    func generateText(contextId: Int, prompt: String, params: [String: Any]?, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        
+        // Create completion parameters
+        var completionParams = params ?? [:]
+        completionParams["prompt"] = prompt
+        
+        // Call completion method directly
+        self.completion(contextId: contextId, params: completionParams, completion: completion)
+    }
+    
+    // MARK: - Session management
+    
+    func loadSession(contextId: Int, filepath: String, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.loadSession(contextId: nativeId, filepath: filepath)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("loadSession failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func saveSession(contextId: Int, filepath: String, size: Int, completion: @escaping (LlamaResult<Int>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let saved = try LlamaNativeBridge.saveSession(contextId: nativeId, filepath: filepath, size: size)
+                completion(.success(saved))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("saveSession failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+    
+    // MARK: - Tokenization
+    
+    func tokenize(contextId: Int, text: String, imagePaths: [String], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        if tokenizeFunc == nil { loadFunctionPointers() }
+        guard let fn = tokenizeFunc else {
+            completion(.failure(.operationFailed("llama_cap_tokenize not found")))
+            return
+        }
+        var pathsJson = "[]"
+        if !imagePaths.isEmpty, let d = try? JSONSerialization.data(withJSONObject: imagePaths), let s = String(data: d, encoding: .utf8) {
+            pathsJson = s
+        }
+        let result: LlamaResult<[String: Any]> = text.withCString { txtPtr in
+            pathsJson.withCString { pj in
+                guard let c = fn(nativeId, txtPtr, pj), let dict = jsonObject(fromCString: c) else {
+                    return .failure(.operationFailed("tokenize failed"))
+                }
+                if let err = dict["error"] as? String {
+                    return .failure(.operationFailed(err))
+                }
+                return .success(dict)
+            }
+        }
+        completion(result)
+    }
+    
+    func detokenize(contextId: Int, tokens: [Int], completion: @escaping (LlamaResult<String>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        if detokenizeFunc == nil { loadFunctionPointers() }
+        guard let fn = detokenizeFunc else {
+            completion(.failure(.operationFailed("llama_cap_detokenize not found")))
+            return
+        }
+        guard let d = try? JSONSerialization.data(withJSONObject: tokens), let tokensJson = String(data: d, encoding: .utf8) else {
+            completion(.failure(.invalidParameters))
+            return
+        }
+        let s: LlamaResult<String> = tokensJson.withCString { ptr in
+            guard let c = fn(nativeId, ptr) else {
+                return .success("")
+            }
+            return .success(String(cString: c))
+        }
+        completion(s)
+    }
+    
+    // MARK: - Embeddings and reranking
+    
+    func embedding(contextId: Int, text: String, params: [String: Any], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+
+        let nativeId = contextIdToNative[contextId] ?? Int64(contextId)
+        var paramsJson = "{}"
+        if !params.isEmpty {
+            do {
+                let paramsData = try JSONSerialization.data(withJSONObject: params)
+                paramsJson = String(data: paramsData, encoding: .utf8) ?? "{}"
+            } catch {
+                completion(.failure(.operationFailed("Failed to serialize params: \(error.localizedDescription)")))
+                return
+            }
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let embeddingResult = try LlamaNativeBridge.runEmbedding(contextId: nativeId, text: text, paramsJson: paramsJson)
+                completion(.success(embeddingResult))
+            } catch let error as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(error.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("Native embedding failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+    
+    func rerank(contextId: Int, query: String, documents: [String], params: [String: Any]?, completion: @escaping (LlamaResult<[[String: Any]]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                guard let docsData = try? JSONSerialization.data(withJSONObject: documents),
+                      let docsJson = String(data: docsData, encoding: .utf8) else {
+                    completion(.failure(.operationFailed("Failed to serialize documents")))
+                    return
+                }
+                let results = try LlamaNativeBridge.runRerank(contextId: nativeId, query: query, documentsJson: docsJson)
+                completion(.success(results))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("rerank failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func bench(contextId: Int, pp: Int, tg: Int, pl: Int, nr: Int, completion: @escaping (LlamaResult<String>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.runBench(contextId: nativeId, pp: pp, tg: tg, pl: pl, nr: nr)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("bench failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+    
+    // MARK: - LoRA adapters
+
+    func applyLoraAdapters(contextId: Int, loraAdapters: [[String: Any]], completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: loraAdapters)
+            let json = String(data: data, encoding: .utf8) ?? "[]"
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    _ = try LlamaNativeBridge.applyLoraAdapters(contextId: nativeId, loraAdaptersJson: json)
+                    completion(.success(()))
+                } catch let err as LlamaNativeBridge.Failure {
+                    completion(.failure(.operationFailed(err.localizedDescription)))
+                } catch {
+                    completion(.failure(.operationFailed("applyLoraAdapters failed: \(error.localizedDescription)")))
+                }
+            }
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize LoRA adapters: \(error.localizedDescription)")))
+        }
+    }
+
+    func removeLoraAdapters(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try LlamaNativeBridge.removeLoraAdapters(contextId: nativeId)
+                completion(.success(()))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("removeLoraAdapters failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func getLoadedLoraAdapters(contextId: Int, completion: @escaping (LlamaResult<[[String: Any]]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let adapters = try LlamaNativeBridge.getLoadedLoraAdapters(contextId: nativeId)
+                completion(.success(adapters))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getLoadedLoraAdapters failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+    
+    // MARK: - Multimodal methods
+
+    func initMultimodal(contextId: Int, path: String, useGpu: Bool, completion: @escaping (LlamaResult<Bool>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let ok = try LlamaNativeBridge.initMultimodal(contextId: nativeId, mmProjPath: path, useGpu: useGpu)
+                if ok { context.isMultimodalEnabled = true }
+                completion(.success(ok))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("initMultimodal failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func isMultimodalEnabled(contextId: Int, completion: @escaping (LlamaResult<Bool>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(context.isMultimodalEnabled))
+            return
+        }
+        let enabled = LlamaNativeBridge.isMultimodalEnabled(contextId: nativeId)
+        context.isMultimodalEnabled = enabled
+        completion(.success(enabled))
+    }
+
+    func getMultimodalSupport(contextId: Int, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(["vision": false, "audio": false]))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let support = try LlamaNativeBridge.getMultimodalSupport(contextId: nativeId)
+                completion(.success(support))
+            } catch {
+                completion(.success(["vision": false, "audio": false]))
+            }
+        }
+    }
+
+    func releaseMultimodal(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            context.isMultimodalEnabled = false
+            completion(.success(()))
+            return
+        }
+        LlamaNativeBridge.releaseMultimodal(contextId: nativeId)
+        context.isMultimodalEnabled = false
+        completion(.success(()))
+    }
+    
+    // MARK: - TTS methods
+
+    func initVocoder(contextId: Int, path: String, nBatch: Int?, completion: @escaping (LlamaResult<Bool>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        let batchSize = nBatch ?? 512
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let ok = try LlamaNativeBridge.initVocoder(contextId: nativeId, path: path, nBatch: batchSize)
+                if ok { context.isVocoderEnabled = true }
+                completion(.success(ok))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("initVocoder failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func isVocoderEnabled(contextId: Int, completion: @escaping (LlamaResult<Bool>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.success(context.isVocoderEnabled))
+            return
+        }
+        let enabled = LlamaNativeBridge.isVocoderEnabled(contextId: nativeId)
+        context.isVocoderEnabled = enabled
+        completion(.success(enabled))
+    }
+
+    func getFormattedAudioCompletion(contextId: Int, speakerJsonStr: String, textToSpeak: String, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try LlamaNativeBridge.getFormattedAudioCompletion(
+                    contextId: nativeId, speakerJson: speakerJsonStr, text: textToSpeak)
+                completion(.success(result))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getFormattedAudioCompletion failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func getAudioCompletionGuideTokens(contextId: Int, textToSpeak: String, completion: @escaping (LlamaResult<[Int]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let tokens = try LlamaNativeBridge.getAudioCompletionGuideTokens(contextId: nativeId, text: textToSpeak)
+                completion(.success(tokens))
+            } catch let err as LlamaNativeBridge.Failure {
+                completion(.failure(.operationFailed(err.localizedDescription)))
+            } catch {
+                completion(.failure(.operationFailed("getAudioCompletionGuideTokens failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func decodeAudioTokens(contextId: Int, tokens: [Int], completion: @escaping (LlamaResult<[Int]>) -> Void) {
+        guard contexts[contextId] != nil else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: tokens)
+            let json = String(data: data, encoding: .utf8) ?? "[]"
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let floatSamples = try LlamaNativeBridge.decodeAudioTokens(contextId: nativeId, tokensJson: json)
+                    // Convert float PCM [-1,1] to Int16 range for interop
+                    let intSamples = floatSamples.map { Int(($0 * 32767.0).clamped(to: -32768...32767)) }
+                    completion(.success(intSamples))
+                } catch let err as LlamaNativeBridge.Failure {
+                    completion(.failure(.operationFailed(err.localizedDescription)))
+                } catch {
+                    completion(.failure(.operationFailed("decodeAudioTokens failed: \(error.localizedDescription)")))
+                }
+            }
+        } catch {
+            completion(.failure(.operationFailed("Failed to serialize tokens: \(error.localizedDescription)")))
+        }
+    }
+
+    func releaseVocoder(contextId: Int, completion: @escaping (LlamaResult<Void>) -> Void) {
+        guard let context = contexts[contextId] else {
+            completion(.failure(.contextNotFound))
+            return
+        }
+        guard let nativeId = contextIdToNative[contextId] else {
+            context.isVocoderEnabled = false
+            completion(.success(()))
+            return
+        }
+        LlamaNativeBridge.releaseVocoder(contextId: nativeId)
+        context.isVocoderEnabled = false
+        completion(.success(()))
+    }
+    
+    // MARK: - Model download and management
+    //
+    // Active downloads keyed by URL string. URLSession-based to support real progress
+    // and cancellation — replaces the old blocking Data(contentsOf:) implementation.
+
+    private var activeDownloads: [String: ActiveDownload] = [:]
+
+    private class ActiveDownload: NSObject, URLSessionDownloadDelegate {
+        let url: String
+        let localPath: String
+        var downloadedBytes: Int64 = 0
+        var totalBytes: Int64 = 0
+        var completed: Bool = false
+        var failed: Bool = false
+        var errorMessage: String?
+        var session: URLSession?
+        var task: URLSessionDownloadTask?
+        var onProgress: ((Int64, Int64) -> Void)?
+        var onDone: ((String?) -> Void)?
+
+        init(url: String, localPath: String) {
+            self.url = url
+            self.localPath = localPath
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64,
+                        totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+            downloadedBytes = totalBytesWritten
+            totalBytes = totalBytesExpectedToWrite
+            onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {
+            do {
+                let dest = URL(fileURLWithPath: localPath)
+                if FileManager.default.fileExists(atPath: localPath) {
+                    try FileManager.default.removeItem(at: dest)
+                }
+                try FileManager.default.moveItem(at: location, to: dest)
+                completed = true
+                onDone?(nil)
+            } catch {
+                failed = true
+                errorMessage = error.localizedDescription
+                onDone?(error.localizedDescription)
+            }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            if let error = error, !completed {
+                failed = true
+                errorMessage = error.localizedDescription
+                onDone?(error.localizedDescription)
+            }
+        }
+    }
+
+    func downloadModel(url: String, filename: String, completion: @escaping (LlamaResult<String>) -> Void) {
+        guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            completion(.failure(.operationFailed("Cannot access documents directory")))
+            return
+        }
+        let localPath = documentsDir.appendingPathComponent(filename).path
+        // Return cached file immediately
+        if FileManager.default.fileExists(atPath: localPath) {
+            completion(.success(localPath))
+            return
+        }
+        guard let downloadURL = URL(string: url) else {
+            completion(.failure(.operationFailed("Invalid URL: \(url)")))
+            return
+        }
+        let dl = ActiveDownload(url: url, localPath: localPath)
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: dl, delegateQueue: nil)
+        dl.session = session
+        dl.onDone = { [weak self] errorMsg in
+            self?.activeDownloads.removeValue(forKey: url)
+            if let msg = errorMsg {
+                // Don't call completion again; the path was already returned
+                print("[LlamaCpp] Download failed for \(url): \(msg)")
+            }
+        }
+        activeDownloads[url] = dl
+        let task = session.downloadTask(with: downloadURL)
+        dl.task = task
+        task.resume()
+        // Return the path immediately; caller polls getDownloadProgress
+        completion(.success(localPath))
+    }
+
+    func getDownloadProgress(url: String, completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        guard let dl = activeDownloads[url] else {
+            // Check if the file exists (completed in a previous session)
+            let result: [String: Any] = [
+                "progress": 0, "completed": false, "failed": false,
+                "downloadedBytes": 0, "totalBytes": 0
+            ]
+            completion(.success(result))
+            return
+        }
+        let progress: Double = dl.totalBytes > 0 ? Double(dl.downloadedBytes) / Double(dl.totalBytes) : 0
+        let result: [String: Any] = [
+            "progress": progress,
+            "completed": dl.completed,
+            "failed": dl.failed,
+            "errorMessage": dl.errorMessage ?? "",
+            "localPath": dl.localPath,
+            "downloadedBytes": dl.downloadedBytes,
+            "totalBytes": dl.totalBytes
+        ]
+        completion(.success(result))
+    }
+
+    func cancelDownload(url: String, completion: @escaping (LlamaResult<Bool>) -> Void) {
+        guard let dl = activeDownloads[url] else {
+            completion(.success(false))
+            return
+        }
+        dl.task?.cancel()
+        dl.session?.invalidateAndCancel()
+        activeDownloads.removeValue(forKey: url)
+        completion(.success(true))
+    }
+    
+    func getAvailableModels(completion: @escaping (LlamaResult<[[String: Any]]>) -> Void) {
+        let fileManager = FileManager.default
+        var models: [[String: Any]] = []
+        
+        // Search common model directories
+        let searchPaths = [
+            fileManager.urls(for: .documentDirectory, in: .userDomainMask).first,
+            fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        ].compactMap { $0 }
+        
+        for searchPath in searchPaths {
+            do {
+                let files = try fileManager.contentsOfDirectory(at: searchPath, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+                
+                for file in files {
+                    let pathExtension = file.pathExtension.lowercased()
+                    // Check for common model file extensions
+                    if pathExtension == "gguf" || pathExtension == "ggml" || pathExtension == "bin" {
+                        let attributes = try fileManager.attributesOfItem(atPath: file.path)
+                        let fileSize = attributes[.size] as? Int64 ?? 0
+                        
+                        let model: [String: Any] = [
+                            "id": file.lastPathComponent,
+                            "name": file.lastPathComponent,
+                            "path": file.path,
+                            "size": fileSize,
+                            "sizeMB": Double(fileSize) / (1024 * 1024),
+                            "status": "available"
+                        ]
+                        models.append(model)
+                    }
+                }
+            } catch {
+                // Continue searching other paths
+                continue
+            }
+        }
+        
+        completion(.success(models))
+    }
+
+    // MARK: - Native in-process HTTP server (127.0.0.1 — use App Transport Security allowances for localhost in the host app)
+
+    func startNativeLlamaServer(modelPath: String, host: String?, port: Int, params: [String: Any], completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        if capServerStartFunc == nil { loadFunctionPointers() }
+        guard let start = capServerStartFunc else {
+            completion(.failure(.operationFailed("cap_llama_server_start not available")))
+            return
+        }
+        var paramsJson = "{}"
+        do {
+            let data = try JSONSerialization.data(withJSONObject: params)
+            paramsJson = String(data: data, encoding: .utf8) ?? "{}"
+        } catch {
+            completion(.failure(.operationFailed("params JSON: \(error.localizedDescription)")))
+            return
+        }
+        let h = (host != nil && !host!.isEmpty) ? host! : "127.0.0.1"
+        let rc = modelPath.withCString { mp in
+            h.withCString { hp in
+                paramsJson.withCString { pj in
+                    start(mp, hp, Int32(port), pj)
+                }
+            }
+        }
+        if rc != 0 {
+            completion(.success(["running": true]))
+        } else {
+            completion(.failure(.operationFailed("startNativeLlamaServer failed")))
+        }
+    }
+
+    func stopNativeLlamaServer(completion: @escaping (LlamaResult<Void>) -> Void) {
+        if capServerStopFunc == nil { loadFunctionPointers() }
+        guard let stop = capServerStopFunc else {
+            completion(.failure(.operationFailed("cap_llama_server_stop not available")))
+            return
+        }
+        stop()
+        completion(.success(()))
+    }
+
+    func isNativeLlamaServerRunning(completion: @escaping (LlamaResult<[String: Any]>) -> Void) {
+        if capServerIsRunningFunc == nil { loadFunctionPointers() }
+        guard let fn = capServerIsRunningFunc else {
+            completion(.failure(.operationFailed("cap_llama_server_is_running not available")))
+            return
+        }
+        let running = fn() != 0
+        completion(.success(["running": running]))
+    }
+    
+    // MARK: - Grammar utilities
+    
+    func convertJsonSchemaToGrammar(schema: String, completion: @escaping (LlamaResult<String>) -> Void) {
+        if grammarFunc == nil { loadFunctionPointers() }
+        guard let fn = grammarFunc else {
+            completion(.success(schema))
+            return
+        }
+        let s: LlamaResult<String> = schema.withCString { ptr in
+            guard let c = fn(ptr) else {
+                return .success("")
+            }
+            let g = String(cString: c)
+            return g.isEmpty ? .success(schema) : .success(g)
+        }
+        completion(s)
+    }
+}

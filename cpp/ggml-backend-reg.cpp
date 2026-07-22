@@ -246,6 +246,9 @@ struct lm_ggml_backend_registry {
         }
 
         auto score_fn = (lm_ggml_backend_score_t) dl_get_sym(handle.get(), "lm_ggml_backend_score");
+        if (!score_fn) {
+            score_fn = (lm_ggml_backend_score_t) dl_get_sym(handle.get(), "ggml_backend_score");
+        }
         if (score_fn && score_fn() == 0) {
             if (!silent) {
                 LM_GGML_LOG_INFO("%s: backend %s is not supported on this system\n", __func__, path_str(path).c_str());
@@ -255,20 +258,24 @@ struct lm_ggml_backend_registry {
 
         auto backend_init_fn = (lm_ggml_backend_init_t) dl_get_sym(handle.get(), "lm_ggml_backend_init");
         if (!backend_init_fn) {
+            backend_init_fn = (lm_ggml_backend_init_t) dl_get_sym(handle.get(), "ggml_backend_init");
+        }
+        if (!backend_init_fn) {
             if (!silent) {
-                LM_GGML_LOG_ERROR("%s: failed to find lm_ggml_backend_init in %s\n", __func__, path_str(path).c_str());
+                LM_GGML_LOG_ERROR("%s: failed to find lm_ggml_backend_init/ggml_backend_init in %s\n", __func__, path_str(path).c_str());
             }
             return nullptr;
         }
 
         lm_ggml_backend_reg_t reg = backend_init_fn();
-        if (!reg || reg->api_version != LM_GGML_BACKEND_API_VERSION) {
+        // Accept fork API v1 and current upstream ggml API v2 when layouts are compatible.
+        if (!reg || (reg->api_version != LM_GGML_BACKEND_API_VERSION && reg->api_version != 2)) {
             if (!silent) {
                 if (!reg) {
-                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: lm_ggml_backend_init returned NULL\n",
+                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: backend_init returned NULL\n",
                         __func__, path_str(path).c_str());
                 } else {
-                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: incompatible API version (backend: %d, current: %d)\n",
+                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: incompatible API version (backend: %d, current: %d or 2)\n",
                         __func__, path_str(path).c_str(), reg->api_version, LM_GGML_BACKEND_API_VERSION);
                 }
             }
@@ -535,6 +542,9 @@ static lm_ggml_backend_reg_t lm_ggml_backend_load_best(const char * name, bool s
                     }
                     if (handle) {
                         auto score_fn = (lm_ggml_backend_score_t) dl_get_sym(handle.get(), "lm_ggml_backend_score");
+                        if (!score_fn) {
+                            score_fn = (lm_ggml_backend_score_t) dl_get_sym(handle.get(), "ggml_backend_score");
+                        }
                         if (score_fn) {
                             int s = score_fn();
 #ifndef NDEBUG
@@ -546,7 +556,7 @@ static lm_ggml_backend_reg_t lm_ggml_backend_load_best(const char * name, bool s
                             }
                         } else {
                             if (!silent) {
-                                LM_GGML_LOG_INFO("%s: failed to find lm_ggml_backend_score in %s\n", __func__, path_str(entry.path()).c_str());
+                                LM_GGML_LOG_INFO("%s: failed to find lm_ggml_backend_score/ggml_backend_score in %s\n", __func__, path_str(entry.path()).c_str());
                             }
                         }
                     }

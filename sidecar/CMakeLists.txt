@@ -75,6 +75,9 @@ endif()
 set(SIDECAR_NEEDS_SUFFIX ON)
 if(SIDECAR_VARIANT STREQUAL "vulkan-openblas" AND NOT SIDECAR_PLATFORM STREQUAL "darwin")
     set(SIDECAR_NEEDS_SUFFIX OFF)
+elseif(SIDECAR_VARIANT STREQUAL "cpu" AND NOT SIDECAR_PLATFORM STREQUAL "darwin")
+    # CPU is a valid default desktop binary for npm packaging (win32-x64.exe / linux-x64).
+    set(SIDECAR_NEEDS_SUFFIX OFF)
 elseif(SIDECAR_VARIANT STREQUAL "metal-coreml" AND SIDECAR_PLATFORM STREQUAL "darwin" AND SIDECAR_ARCH STREQUAL "arm64")
     set(SIDECAR_NEEDS_SUFFIX OFF)
 elseif(SIDECAR_VARIANT STREQUAL "metal" AND SIDECAR_PLATFORM STREQUAL "darwin")
@@ -147,6 +150,47 @@ target_compile_options(${SIDECAR_BINARY_NAME} PRIVATE ${SIDECAR_COMPILE_DEFS})
 find_package(Threads REQUIRED)
 target_link_libraries(${SIDECAR_BINARY_NAME} PRIVATE Threads::Threads)
 
+# Optional OpenBLAS (CPU BLAS) for openblas / vulkan-openblas variants.
+set(OPENBLAS_ROOT "" CACHE PATH "OpenBLAS install prefix (include/, lib/)")
+if(NOT OPENBLAS_ROOT AND DEFINED ENV{OPENBLAS_ROOT})
+    set(OPENBLAS_ROOT "$ENV{OPENBLAS_ROOT}")
+endif()
+if(SIDECAR_VARIANT MATCHES "openblas")
+    if(OPENBLAS_ROOT AND EXISTS "${OPENBLAS_ROOT}")
+        message(STATUS "OpenBLAS: using ${OPENBLAS_ROOT}")
+        target_include_directories(${SIDECAR_BINARY_NAME} PRIVATE
+            "${OPENBLAS_ROOT}/include"
+        )
+        find_library(OPENBLAS_LIB
+            NAMES openblas libopenblas openblas_shared
+            PATHS
+                "${OPENBLAS_ROOT}/lib"
+                "${OPENBLAS_ROOT}/lib/x64"
+            NO_DEFAULT_PATH
+        )
+        if(NOT OPENBLAS_LIB)
+            find_library(OPENBLAS_LIB NAMES openblas libopenblas)
+        endif()
+        if(OPENBLAS_LIB)
+            target_link_libraries(${SIDECAR_BINARY_NAME} PRIVATE "${OPENBLAS_LIB}")
+            target_compile_definitions(${SIDECAR_BINARY_NAME} PRIVATE LLAMA_CPP_PRO_USE_OPENBLAS=1)
+            message(STATUS "OpenBLAS library: ${OPENBLAS_LIB}")
+        else()
+            message(WARNING "OPENBLAS_ROOT set but openblas library not found — building without OpenBLAS link")
+        endif()
+    else()
+        message(WARNING "SIDECAR_VARIANT=${SIDECAR_VARIANT} but OPENBLAS_ROOT is unset — CPU BLAS not linked")
+    endif()
+endif()
+
+# Surface Vulkan SDK for optional ggml plugin builds / tooling.
+if(DEFINED ENV{VULKAN_SDK} AND NOT VULKAN_SDK)
+    set(VULKAN_SDK "$ENV{VULKAN_SDK}" CACHE PATH "Vulkan SDK root")
+endif()
+if(VULKAN_SDK)
+    message(STATUS "Vulkan SDK: ${VULKAN_SDK}")
+endif()
+
 if(APPLE)
     find_library(ACCELERATE_FRAMEWORK Accelerate)
     find_library(METAL_FRAMEWORK Metal)
@@ -169,6 +213,7 @@ endif()
 if(WIN32)
     target_link_libraries(${SIDECAR_BINARY_NAME} PRIVATE ws2_32)
     if(MSVC)
+        target_compile_definitions(${SIDECAR_BINARY_NAME} PRIVATE _USE_MATH_DEFINES)
         set_property(TARGET ${SIDECAR_BINARY_NAME} PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
@@ -176,6 +221,8 @@ endif()
 
 if(UNIX AND NOT APPLE)
     target_link_options(${SIDECAR_BINARY_NAME} PRIVATE -static-libgcc -static-libstdc++)
+    # ggml-cpu.c uses SCHED_BATCH / pthread_setaffinity_np (GNU extensions)
+    target_compile_definitions(${SIDECAR_BINARY_NAME} PRIVATE _GNU_SOURCE)
 endif()
 
 set_target_properties(${SIDECAR_BINARY_NAME} PROPERTIES
@@ -185,8 +232,13 @@ set_target_properties(${SIDECAR_BINARY_NAME} PROPERTIES
 
 # Optional: build ggml backend plugins from upstream llama.cpp
 set(LLAMA_CPP_UPSTREAM "" CACHE PATH "Path to upstream llama.cpp for ggml GPU backend plugins")
-if(LLAMA_CPP_UPSTREAM AND EXISTS "${LLAMA_CPP_UPSTREAM}/CMakeLists.txt")
+if(NOT LLAMA_CPP_UPSTREAM AND DEFINED ENV{LLAMA_CPP_UPSTREAM})
+    set(LLAMA_CPP_UPSTREAM "$ENV{LLAMA_CPP_UPSTREAM}")
+endif()
+if(LLAMA_CPP_UPSTREAM AND EXISTS "${LLAMA_CPP_UPSTREAM}/ggml/CMakeLists.txt")
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/ggml-backends.cmake)
+elseif(LLAMA_CPP_UPSTREAM)
+    message(WARNING "LLAMA_CPP_UPSTREAM=${LLAMA_CPP_UPSTREAM} but ggml/CMakeLists.txt missing — skipping GPU plugins")
 endif()
 
 install(TARGETS ${SIDECAR_BINARY_NAME} RUNTIME DESTINATION "sidecar")

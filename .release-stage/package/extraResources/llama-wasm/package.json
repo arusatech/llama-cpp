@@ -1,0 +1,16 @@
+{
+  "name": "llama_engine",
+  "type": "module",
+  "description": "Embedded llama.cpp Wasm runtime for llama-cpp-pro (web/PWA)",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "llama_engine.wasm",
+    "llama_engine.js",
+    "llama_engine.d.ts",
+    "llama_engine_emscripten.mjs"
+  ],
+  "main": "llama_engine.js",
+  "types": "llama_engine.d.ts",
+  "sideEffects": []
+}

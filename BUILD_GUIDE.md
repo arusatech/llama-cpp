@@ -371,11 +371,51 @@ Electron renderer  ←→  IPC bridge  ←→  Native sidecar process
 
 ### Prerequisites
 
+**All desktop hosts**
+
 - CMake ≥ 3.20
-- For `cuda` variant: NVIDIA CUDA Toolkit
-- For `rocm` variant: AMD ROCm
-- For `vulkan` variant: Vulkan SDK
-- For `openblas` variant: OpenBLAS library
+- Node.js 18+ (for `stage:desktop` / verify scripts)
+
+**macOS**
+
+- Xcode / Metal toolchain (default backends: `metal` / `metal-coreml`)
+- No Vulkan SDK, OpenBLAS, or upstream `llama.cpp` checkout required for the default Mac sidecar
+
+**Windows / Linux (Vulkan + OpenBLAS release path)**
+
+These must be installed **outside** this repo and pointed at via env vars:
+
+| Dependency | Purpose | Env |
+|------------|---------|-----|
+| **Vulkan SDK** | Headers/libs + `glslc` for `ggml-vulkan` plugin | `VULKAN_SDK` |
+| **OpenBLAS** | Faster CPU BLAS path linked into the sidecar | `OPENBLAS_ROOT` |
+| **Upstream [llama.cpp](https://github.com/ggerganov/llama.cpp)** | Separate clone used to build GPU backend DLLs/SOs (`ggml-vulkan`, etc.) | `LLAMA_CPP_UPSTREAM` |
+
+```bash
+# Clone upstream once (sibling of llama-cpp-pro is fine)
+git clone https://github.com/ggerganov/llama.cpp.git ../llama.cpp
+
+export VULKAN_SDK=/path/to/VulkanSDK
+export OPENBLAS_ROOT=/path/to/OpenBLAS
+export LLAMA_CPP_UPSTREAM=/absolute/path/to/llama.cpp
+```
+
+PowerShell (Windows):
+
+```powershell
+$env:VULKAN_SDK = "C:\VulkanSDK\1.4.350.0"
+$env:OPENBLAS_ROOT = "C:\OpenBLAS"
+$env:LLAMA_CPP_UPSTREAM = "C:\Users\arusa\Project\llama.cpp"
+```
+
+Optional / alternate backends:
+
+- CUDA Toolkit → `cuda` variant
+- AMD ROCm → `rocm` variant
+- CPU-only smoke builds → `cpu` (skips Vulkan plugin)
+
+Generated libraries are copied into **this** package (`extraResources/sidecar/` and `ggml-plugins/…`) by `npm run stage:desktop` so Electron apps and npm consumers do not need those external trees at runtime.
+
 
 ### Build sidecar
 
@@ -433,10 +473,30 @@ npm run verify:desktop:bundle -- --arch=universal
 ### Stage for packaging
 
 ```bash
-# Copies sidecar binary + WASM assets to extraResources/
+# Copies sidecar binary + OpenBLAS/Vulkan runtime libs + WASM assets into extraResources/
+npm run stage:desktop
+# Full desktop convenience target:
 npm run build:desktop
-# equivalent (via variants script):
+# equivalent (via variants script on macOS):
 ./build-variants.sh --variant desktop
+```
+
+Staged layout (shipped with the npm package):
+
+```text
+extraResources/sidecar/
+  darwin-arm64 | darwin-x64 | linux-x64 | win32-x64.exe
+  libopenblas.dll                    # Windows, when OpenBLAS was linked
+  ggml-plugins/<platform>-<arch>/    # e.g. win32-x64/ggml-vulkan.dll
+extraResources/llama-wasm/           # from PWA/WASM build
+```
+
+Verify before packaging:
+
+```bash
+npm run verify:desktop:bundle -- --arch=universal          # macOS
+npm run verify:desktop:bundle -- --platform=win32          # Windows
+npm run verify:desktop:bundle -- --platform=linux          # Linux
 ```
 
 ### Electron integration (3 files to add)

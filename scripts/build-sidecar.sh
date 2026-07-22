@@ -137,6 +137,12 @@ fi
 if [[ -n "${LLAMA_CPP_UPSTREAM:-}" ]]; then
   CMAKE_ARGS+=("-DLLAMA_CPP_UPSTREAM=${LLAMA_CPP_UPSTREAM}")
 fi
+if [[ -n "${OPENBLAS_ROOT:-}" ]]; then
+  CMAKE_ARGS+=("-DOPENBLAS_ROOT=${OPENBLAS_ROOT}" "-DCMAKE_PREFIX_PATH=${OPENBLAS_ROOT}")
+fi
+if [[ -n "${VULKAN_SDK:-}" ]]; then
+  CMAKE_ARGS+=("-DVULKAN_SDK=${VULKAN_SDK}" "-DCMAKE_PREFIX_PATH=${VULKAN_SDK};${OPENBLAS_ROOT:-}")
+fi
 
 echo "==> Configuring sidecar (variant=${VARIANT} arch=${TARGET_ARCH})"
 cmake "${CMAKE_ARGS[@]}"
@@ -171,10 +177,27 @@ find "${BUILD_DIR}/bin" -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dll" -o
   cp -f "$f" "${BIN_DIR}/" || true
 done
 
+# Stage ggml GPU plugins into electron-expected layout
+if [[ "$(uname -s)" == "Linux" ]]; then
+  PLUGIN_DST="${BIN_DIR}/ggml-plugins/linux-${TARGET_ARCH}"
+  mkdir -p "${PLUGIN_DST}"
+  if [[ -d "${BUILD_DIR}/ggml-plugins" ]]; then
+    cp -f "${BUILD_DIR}/ggml-plugins/"* "${PLUGIN_DST}/" 2>/dev/null || true
+  fi
+  find "${BUILD_DIR}" -type f \( -name 'libggml-vulkan.so*' -o -name 'ggml-vulkan.so*' \) 2>/dev/null | while read -r f; do
+    cp -f "$f" "${PLUGIN_DST}/" || true
+    cp -f "$f" "${BIN_DIR}/" || true
+  done
+fi
+
 if [[ -n "${EXPECTED_NAME}" ]]; then
   STAGED="${BIN_DIR}/${EXPECTED_NAME}"
   if [[ -f "${STAGED}" ]]; then
-    echo "==> Built $(file "${STAGED}")"
+    if command -v file >/dev/null 2>&1; then
+      echo "==> Built $(file "${STAGED}")"
+    else
+      echo "==> Built ${STAGED}"
+    fi
   else
     echo "warning: expected ${EXPECTED_NAME} not found in ${BIN_DIR}" >&2
   fi
@@ -182,3 +205,4 @@ fi
 
 echo "==> Done. Binaries in ${BIN_DIR}:"
 ls -la "${BIN_DIR}" || true
+ls -la "${BIN_DIR}/ggml-plugins" 2>/dev/null || true
