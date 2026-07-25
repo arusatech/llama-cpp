@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Build llama-cpp.xcframework (device + simulator) inside this npm package.
 #
+# Sources: third_party/llama.cpp (upstream ggml/llama) + native/ adapters.
+# ios/CMakeLists.txt add_subdirectory's upstream with GGML_METAL (+ embed).
+# Legacy cpp/ is not used. See docs/NATIVE_UPSTREAM.md.
+#
 # Consumer Capacitor apps — run from app root after npm install (do not copy this file):
 #   bash node_modules/llama-cpp-capacitor/scripts/ensure-llama-ios-xcframework.sh
 #
@@ -22,10 +26,19 @@ IOS_DIR="$PLUGIN_DIR/ios"
 FRAMEWORK_DIR="$IOS_DIR/Frameworks"
 XCFRAMEWORK_DIR="$FRAMEWORK_DIR/llama-cpp.xcframework"
 BUILD_PROFILE_FILE="$FRAMEWORK_DIR/.llama-cpp-build-profile"
-# Bump when native sources change (e.g. Metal embed) so cached xcframework is rebuilt.
-EXPECTED_BUILD_PROFILE="metal-embed-cpu-fallback-v1"
+# Bump when native/upstream wiring changes so cached xcframework is rebuilt.
+EXPECTED_BUILD_PROFILE="upstream-metal-embed-v2"
 DEVICE_BUILD_DIR="$IOS_DIR/build-device"
 SIM_BUILD_DIR="$IOS_DIR/build-simulator"
+
+if [ ! -f "$PLUGIN_DIR/third_party/llama.cpp/CMakeLists.txt" ] && [ -z "${LLAMA_CPP_UPSTREAM:-}" ]; then
+  echo "Error: third_party/llama.cpp missing (and LLAMA_CPP_UPSTREAM unset). Init the submodule."
+  exit 1
+fi
+if [ ! -f "$PLUGIN_DIR/native/cap-llama.cpp" ]; then
+  echo "Error: native/ adapters missing at $PLUGIN_DIR/native"
+  exit 1
+fi
 
 if [[ "$OSTYPE" != darwin* ]]; then
   echo "Skipping llama-cpp xcframework build: macOS with Xcode is required."

@@ -49,12 +49,16 @@ function copyDir(src, dst, filter) {
 
 const BIN_PATTERNS = [
   /^darwin-(arm64|x64)$/,
-  /^linux-x64(-(rocm|cuda|vulkan|openblas|cpu))?$/,
-  /^win32-x64(-(rocm|cuda|vulkan|openblas|cpu))?\.exe$/,
+  /^linux-x64(-(rocm|cuda|vulkan|openblas|openvino|cpu))?$/,
+  /^win32-x64(-(rocm|cuda|vulkan|vulkan-openblas|openblas|openvino|cpu))?\.exe$/,
 ];
 
 function shouldCopyBin(name) {
   return BIN_PATTERNS.some((re) => re.test(name));
+}
+
+function isGpuBackendPlugin(name) {
+  return /ggml-(vulkan|cuda|hip|openvino|metal|blas)/i.test(name);
 }
 
 function stageSidecarBins() {
@@ -66,6 +70,8 @@ function stageSidecarBins() {
   let copied = 0;
   for (const name of fs.readdirSync(srcBin)) {
     if (!shouldCopyBin(name) && !/\.(dll|so|dylib)$/i.test(name)) continue;
+    // GPU plugins must live under ggml-plugins/ only — never next to the exe.
+    if (isGpuBackendPlugin(name)) continue;
     if (onlyPlatform && !name.startsWith(onlyPlatform) && !/\.(dll|so|dylib)$/i.test(name)) {
       // Always allow runtime DLLs (e.g. libopenblas.dll) regardless of --platform filter.
       if (!/\.(dll|so|dylib)$/i.test(name)) continue;
@@ -109,6 +115,16 @@ function stageRuntimeLibs() {
   );
 }
 
+function stageOpenVinoRuntime() {
+  const src = path.join(srcBin, 'openvino-runtime');
+  if (!fs.existsSync(src)) return 0;
+  const n = copyDir(src, path.join(dstRoot, 'openvino-runtime'), (name) =>
+    /\.(dll|so(\.\d+)*)$/i.test(name),
+  );
+  if (n > 0) console.log(`  staged ${n} OpenVINO runtime file(s)`);
+  return n;
+}
+
 function stageWasm() {
   const srcWasm = path.join(root, 'dist', 'wasm');
   const dstWasm = path.join(root, 'extraResources', 'llama-wasm');
@@ -126,6 +142,7 @@ function promoteDefaultWinSidecar() {
     'win32-x64-cpu.exe',
     'win32-x64-vulkan-openblas.exe',
     'win32-x64-vulkan.exe',
+    'win32-x64-openvino.exe',
     'win32-x64-openblas.exe',
   ]) {
     const src = path.join(dstRoot, alt);
@@ -142,9 +159,10 @@ const bins = stageSidecarBins();
 promoteDefaultWinSidecar();
 const plugins = stageGgmlPlugins();
 const libs = stageRuntimeLibs();
+const ov = stageOpenVinoRuntime();
 const wasm = stageWasm();
 
-console.log(`Done: ${bins} sidecar binary(ies), ${plugins} plugin file(s), ${libs} runtime lib(s), ${wasm} wasm file(s)`);
+console.log(`Done: ${bins} sidecar binary(ies), ${plugins} plugin file(s), ${libs} runtime lib(s), ${ov} openvino file(s), ${wasm} wasm file(s)`);
 
 if (bins === 0) {
   console.error('No sidecar binaries staged.');

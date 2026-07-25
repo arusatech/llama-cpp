@@ -395,25 +395,35 @@ export class LlamaContext {
       }
     }
 
-    let tokenListener: any =
-      callback &&
-      LlamaCpp.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
+    let tokenListener: { remove: () => Promise<void> } | null = null;
+    if (callback) {
+      // Await so Capacitor has resolved the handle before we call .remove()
+      tokenListener = await LlamaCpp.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
         const { contextId, tokenResult } = evt;
         if (contextId !== this.id) return;
         callback(tokenResult);
       });
+    }
 
     if (!nativeParams.prompt) throw new Error('Prompt is required');
 
     const promise = LlamaCpp.completion({ contextId: this.id, params: nativeParams });
     return promise
-      .then((completionResult) => {
-        tokenListener?.remove();
+      .then(async (completionResult) => {
+        try {
+          await tokenListener?.remove();
+        } catch {
+          /* ignore */
+        }
         tokenListener = null;
         return completionResult;
       })
-      .catch((err: any) => {
-        tokenListener?.remove();
+      .catch(async (err: any) => {
+        try {
+          await tokenListener?.remove();
+        } catch {
+          /* ignore */
+        }
         tokenListener = null;
         throw err;
       });
@@ -720,9 +730,11 @@ export async function initLlama(
 
   const contextId = ++contextIdCounter;
 
-  let removeProgressListener: any = null;
+  let removeProgressListener: { remove: () => Promise<void> } | null = null;
   if (onProgress) {
-    removeProgressListener = LlamaCpp.addListener(
+    // Must await: Capacitor's proxy only sets the inner remove fn after resolve.
+    // Calling .remove() on the unsettled Promise threw "L is not a function".
+    removeProgressListener = await LlamaCpp.addListener(
       EVENT_ON_INIT_CONTEXT_PROGRESS,
       (evt: { contextId: number; progress: number }) => {
         if (evt.contextId !== contextId) return;
@@ -751,34 +763,45 @@ export async function initLlama(
       - Mobile optimization: ${rest.mobile_speculative !== false ? 'enabled' : 'disabled'}`);
   }
 
-  const {
-    gpu,
-    reasonNoGPU,
-    model: modelDetails,
-    androidLib,
-  } = await LlamaCpp.initContext({
-    contextId,
-    params: {
-      model: path,
-      is_model_asset: !!isModelAsset,
-      use_progress_callback: !!onProgress,
-      pooling_type: poolType,
-      lora: loraPath,
-      lora_list: loraAdapters,
-      ...rest,
-    },
-  }).catch((err: any) => {
-    removeProgressListener?.remove();
+  const safeRemoveProgress = async () => {
+    try {
+      await removeProgressListener?.remove();
+    } catch {
+      /* ignore */
+    }
+    removeProgressListener = null;
+  };
+
+  try {
+    const {
+      gpu,
+      reasonNoGPU,
+      model: modelDetails,
+      androidLib,
+    } = await LlamaCpp.initContext({
+      contextId,
+      params: {
+        model: path,
+        is_model_asset: !!isModelAsset,
+        use_progress_callback: !!onProgress,
+        pooling_type: poolType,
+        lora: loraPath,
+        lora_list: loraAdapters,
+        ...rest,
+      },
+    });
+    await safeRemoveProgress();
+    return new LlamaContext({
+      contextId,
+      gpu,
+      reasonNoGPU,
+      model: modelDetails,
+      androidLib,
+    });
+  } catch (err) {
+    await safeRemoveProgress();
     throw err;
-  });
-  removeProgressListener?.remove();
-  return new LlamaContext({
-    contextId,
-    gpu,
-    reasonNoGPU,
-    model: modelDetails,
-    androidLib,
-  });
+  }
 }
 
 export async function releaseAllLlama(): Promise<void> {
@@ -840,6 +863,7 @@ export * from './isomorphic/provider.web';
 export * from './isomorphic/provider.desktop';
 export * from './isomorphic/desktop.runtime';
 export { LlamaCppDesktop } from './desktop';
+export * from './isomorphic/gguf-preflight';
 export * from './isomorphic/model.admission';
 export * from './isomorphic/model.scheduler';
 export * from './isomorphic/wasmMemoryPolicy';

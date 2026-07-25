@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# Build the wasm32-unknown-emscripten llama_engine package.
+#
+# C/C++ sources come from third_party/llama.cpp (+ native/ adapters) via
+# src-rust/build.rs (cc crate). Override with:
+#   export LLAMA_CPP_UPSTREAM=/path/to/llama.cpp
+#
+# Alternative (not used by this script today): emcmake against upstream, e.g.
+#   emcmake cmake -B build-wasm -S "$LLAMA_CPP_UPSTREAM" \
+#     -DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_TESTS=OFF \
+#     -DGGML_NATIVE=OFF
+# See docs/NATIVE_UPSTREAM.md. Legacy cpp/ is not used.
 set -euo pipefail
 
 export LLAMA_WASM_EMBED_CPP=1
@@ -10,6 +21,20 @@ RUST_DIR="$ROOT_DIR/src-rust"
 OUT_DIR="$RUST_DIR/pkg"
 ENGINE_NAME="llama_engine"
 TARGET_DIR="$RUST_DIR/target"
+
+# Default upstream checkout (submodule); build.rs also honors LLAMA_CPP_UPSTREAM.
+if [[ -z "${LLAMA_CPP_UPSTREAM:-}" && -f "$ROOT_DIR/third_party/llama.cpp/CMakeLists.txt" ]]; then
+  export LLAMA_CPP_UPSTREAM="$ROOT_DIR/third_party/llama.cpp"
+fi
+if [[ ! -f "${LLAMA_CPP_UPSTREAM:-}/CMakeLists.txt" ]]; then
+  echo "Error: upstream llama.cpp not found (expected third_party/llama.cpp or LLAMA_CPP_UPSTREAM)."
+  echo "Init the submodule or set LLAMA_CPP_UPSTREAM. See docs/NATIVE_UPSTREAM.md."
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/native/cap-llama.cpp" ]]; then
+  echo "Error: native/ adapters missing at $ROOT_DIR/native"
+  exit 1
+fi
 
 # Homebrew rustup is keg-only on macOS; include it when present.
 if [[ -d "/opt/homebrew/opt/rustup/bin" ]]; then
@@ -76,6 +101,7 @@ echo "  - CXX_wasm32_unknown_emscripten=$CXX_wasm32_unknown_emscripten"
 echo "  - CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER=$CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER"
 echo "  - EMSDK_CACHE=$EMSDK_CACHE"
 echo "  - LLAMA_WASM_SYSROOT=$LLAMA_WASM_SYSROOT"
+echo "  - LLAMA_CPP_UPSTREAM=$LLAMA_CPP_UPSTREAM"
 echo "  - LLAMA_WASM_JSPI=$LLAMA_WASM_JSPI"
 echo "  - LLAMA_WASM_PTHREAD=$LLAMA_WASM_PTHREAD"
 
@@ -196,7 +222,7 @@ writeFileSync(process.argv[2], src);
 # ── Stage 4: emcc MAIN_MODULE re-link → llama_engine_emscripten.{mjs,wasm} ──
 # Replay the captured linker args, replacing -sSIDE_MODULE=2 with -sMAIN_MODULE=1
 # and redirecting output to an ESM file (.mjs).  This produces a self-contained
-# browser module that includes both the llama.cpp C/C++ code and the Rust glue.
+# browser module that includes upstream llama.cpp + native/ adapters and Rust glue.
 echo "Stage 4: emcc MAIN_MODULE re-link ..."
 source "$EMCC_ARGS_FILE"  # loads: EMCC_CAPTURED_OUTPUT, EMCC_CAPTURED_ARGS
 

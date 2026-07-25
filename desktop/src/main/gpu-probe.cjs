@@ -50,9 +50,30 @@ function probeWindows(_fs) {
 
   const openvinoCandidates = [
     path.join(sys32, 'openvino.dll'),
+    // Staged next to the sidecar by scripts/stage-openvino-runtime.cjs
+    path.join(process.env.LLAMA_SIDECAR_DIR || '', 'openvino-runtime', 'openvino.dll'),
+    path.join(programFiles, 'Intel', 'openvino_2026', 'runtime', 'bin', 'intel64', 'Release', 'openvino.dll'),
     path.join(programFiles, 'Intel', 'openvino_2025', 'runtime', 'bin', 'intel64', 'Release', 'openvino.dll'),
   ];
-  const openvino = findLibrary(openvinoCandidates, _fs);
+  // winget MSIX OpenVINO 2026.x
+  try {
+    const { execSync } = require('child_process');
+    const loc = execSync(
+      'powershell -NoProfile -Command "Get-AppxPackage *OpenVINO* | Select-Object -ExpandProperty InstallLocation -First 1"',
+      { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+    ).trim();
+    if (loc) {
+      openvinoCandidates.push(path.join(loc, 'runtime', 'bin', 'intel64', 'Release', 'openvino.dll'));
+    }
+  } catch (_) { /* ignore */ }
+  // Also check relative to this module's packaged resources
+  try {
+    const res = process.resourcesPath || '';
+    if (res) {
+      openvinoCandidates.push(path.join(res, 'sidecar', 'openvino-runtime', 'openvino.dll'));
+    }
+  } catch (_) { /* ignore */ }
+  const openvino = findLibrary(openvinoCandidates.filter(Boolean), _fs);
   backends.push({
     name: 'openvino-npu', kind: 'npu', available: openvino.found,
     reason: openvino.found ? `found ${openvino.path}` : 'OpenVINO runtime not found',

@@ -34,7 +34,7 @@ RUN git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/S
 
 WORKDIR /src
 
-ENV LLAMA_CPP_UPSTREAM=/llama.cpp
+ENV LLAMA_CPP_UPSTREAM=/src/third_party/llama.cpp
 ENV OPENBLAS_ROOT=/usr
 ENV CMAKE_PREFIX_PATH=/usr/local
 

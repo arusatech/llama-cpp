@@ -22,8 +22,8 @@ if errorlevel 1 (
 )
 
 set "UPSTREAM=%LLAMA_CPP_UPSTREAM%"
+if "%UPSTREAM%"=="" if exist "%ROOT%\third_party\llama.cpp\ggml\CMakeLists.txt" set "UPSTREAM=%ROOT%\third_party\llama.cpp"
 if "%UPSTREAM%"=="" if exist "%ROOT%\..\llama.cpp\ggml\CMakeLists.txt" set "UPSTREAM=%ROOT%\..\llama.cpp"
-if "%UPSTREAM%"=="" if exist "C:\Users\arusa\Project\llama.cpp\ggml\CMakeLists.txt" set "UPSTREAM=C:\Users\arusa\Project\llama.cpp"
 
 echo [docker-linux] ROOT=%CD%
 echo [docker-linux] LLAMA_CPP_UPSTREAM=%UPSTREAM%
@@ -32,10 +32,10 @@ docker build -f docker\Dockerfile.sidecar-linux -t llama-cpp-pro-sidecar-linux .
 if errorlevel 1 exit /b 1
 
 if not "%UPSTREAM%"=="" (
-  docker run --rm -v "%CD%:/src" -v "%UPSTREAM%:/llama.cpp:ro" llama-cpp-pro-sidecar-linux
+  docker run --rm -v "%CD%:/src" -v "%UPSTREAM%:/src/third_party/llama.cpp:ro" -e LLAMA_CPP_UPSTREAM=/src/third_party/llama.cpp llama-cpp-pro-sidecar-linux
 ) else (
-  echo WARNING: no llama.cpp upstream — Linux sidecar without ggml-vulkan plugin
-  docker run --rm -v "%CD%:/src" llama-cpp-pro-sidecar-linux
+  echo Using in-tree third_party/llama.cpp submodule inside the image mount
+  docker run --rm -v "%CD%:/src" -e LLAMA_CPP_UPSTREAM=/src/third_party/llama.cpp llama-cpp-pro-sidecar-linux
 )
 if errorlevel 1 exit /b 1
 

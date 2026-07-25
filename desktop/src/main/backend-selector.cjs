@@ -8,7 +8,16 @@ const path = require('path');
 const { getSettingsDir } = require('./model-store.cjs');
 
 const NPU_RANK = ['coreml-npu', 'openvino-npu'];
-const VALID_OVERRIDES = ['auto', 'sidecar-npu', 'sidecar-gpu', 'sidecar-cpu', 'wasm-cpu'];
+const VALID_OVERRIDES = [
+  'auto',
+  'sidecar-npu',
+  'sidecar-gpu',
+  'sidecar-cpu',
+  'wasm-cpu',
+  // Explicit pins for Settings testing
+  'vulkan',
+  'openvino-cpu',
+];
 
 function getGpuRank(platform = process.platform) {
   if (platform === 'darwin') {
@@ -48,10 +57,37 @@ function setUserOverride(backend, deps) {
   _fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function findBestBackend(probeResult, rank) {
+/**
+ * Whether a sidecar variant binary is considered available.
+ * Prefer deps.hasVariantBinary(variant) or deps.availableVariants (string[]) for tests /
+ * packaging. Without those, all variants are treated as available (caller resolves the path).
+ * @param {string|null} variant
+ * @param {object} [deps]
+ * @returns {boolean}
+ */
+function variantBinaryExists(variant, deps) {
+  if (variant == null || variant === 'cpu' || variant === 'openblas') return true;
+  if (deps && typeof deps.hasVariantBinary === 'function') {
+    try {
+      return !!deps.hasVariantBinary(variant);
+    } catch (_) {
+      return false;
+    }
+  }
+  if (deps && Array.isArray(deps.availableVariants)) {
+    return deps.availableVariants.includes(variant);
+  }
+  return true;
+}
+
+function findBestBackend(probeResult, rank, deps) {
+  const platform = (deps && deps.platform) || process.platform;
   for (const name of rank) {
     const b = probeResult.backends.find((x) => x.name === name && x.available);
-    if (b) return name;
+    if (!b) continue;
+    const variant = backendToVariant(name, platform);
+    if (!variantBinaryExists(variant, deps)) continue;
+    return name;
   }
   return null;
 }
@@ -72,7 +108,8 @@ function backendToVariant(gpuBackend, platform) {
     case 'rocm': return 'rocm';
     case 'vulkan': return 'vulkan';
     case 'openvino-gpu':
-    case 'openvino-npu': return 'cuda-openvino';
+    case 'openvino-npu':
+    case 'openvino-cpu': return 'openvino';
     default: return 'vulkan-openblas';
   }
 }
@@ -84,11 +121,27 @@ function selectBackend(probeResult, userOverride, deps) {
   if (userOverride === 'wasm-cpu') {
     return { type: 'wasm-cpu', gpuBackend: null, variant: null, reason: 'User selected WASM CPU' };
   }
+  if (userOverride === 'vulkan') {
+    return {
+      type: 'sidecar-gpu',
+      gpuBackend: 'vulkan',
+      variant: backendToVariant('vulkan', platform),
+      reason: 'User selected Vulkan GPU',
+    };
+  }
+  if (userOverride === 'openvino-cpu') {
+    return {
+      type: 'sidecar-cpu',
+      gpuBackend: 'openvino-cpu',
+      variant: backendToVariant('openvino-cpu', platform),
+      reason: 'User selected OpenVINO CPU (GGML_OPENVINO_DEVICE=CPU)',
+    };
+  }
   if (userOverride === 'sidecar-cpu') {
     return { type: 'sidecar-cpu', gpuBackend: null, variant: 'cpu', reason: 'User selected native CPU' };
   }
   if (userOverride === 'sidecar-gpu') {
-    const bestGpu = findBestBackend(probeResult, gpuRank);
+    const bestGpu = findBestBackend(probeResult, gpuRank, deps);
     if (bestGpu) {
       return {
         type: 'sidecar-gpu', gpuBackend: bestGpu, variant: backendToVariant(bestGpu, platform),
@@ -98,7 +151,7 @@ function selectBackend(probeResult, userOverride, deps) {
     return { type: 'wasm-cpu', gpuBackend: null, variant: null, reason: 'No GPU detected' };
   }
   if (userOverride === 'sidecar-npu') {
-    const bestNpu = findBestBackend(probeResult, NPU_RANK);
+    const bestNpu = findBestBackend(probeResult, NPU_RANK, deps);
     if (bestNpu) {
       return {
         type: 'sidecar-npu', gpuBackend: bestNpu, variant: backendToVariant(bestNpu, platform),
@@ -107,20 +160,35 @@ function selectBackend(probeResult, userOverride, deps) {
     }
   }
 
-  const bestNpu = findBestBackend(probeResult, NPU_RANK);
-  if (bestNpu) {
+  // Auto: on darwin prefer CoreML NPU first; on win/linux prefer GPU before OpenVINO NPU
+  // (OpenVINO sidecar is opt-in — often absent even when the runtime probes present).
+  const tryNpu = () => {
+    const bestNpu = findBestBackend(probeResult, NPU_RANK, deps);
+    if (!bestNpu) return null;
     return {
       type: 'sidecar-npu', gpuBackend: bestNpu, variant: backendToVariant(bestNpu, platform),
       reason: `Auto-selected NPU: ${bestNpu}`,
     };
-  }
-
-  const bestGpu = findBestBackend(probeResult, gpuRank);
-  if (bestGpu) {
+  };
+  const tryGpu = () => {
+    const bestGpu = findBestBackend(probeResult, gpuRank, deps);
+    if (!bestGpu) return null;
     return {
       type: 'sidecar-gpu', gpuBackend: bestGpu, variant: backendToVariant(bestGpu, platform),
       reason: `Auto-selected GPU: ${bestGpu}`,
     };
+  };
+
+  if (platform === 'darwin') {
+    const npu = tryNpu();
+    if (npu) return npu;
+    const gpu = tryGpu();
+    if (gpu) return gpu;
+  } else {
+    const gpu = tryGpu();
+    if (gpu) return gpu;
+    const npu = tryNpu();
+    if (npu) return npu;
   }
 
   if (platform !== 'darwin') {
@@ -143,6 +211,7 @@ module.exports = {
   findBestBackend,
   getGpuRank,
   backendToVariant,
+  variantBinaryExists,
   NPU_RANK,
   VALID_OVERRIDES,
 };

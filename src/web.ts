@@ -731,11 +731,25 @@ export class LlamaCppWeb implements LlamaCppPlugin {
   // -------------------------------------------------------------------------
   // Events
   // -------------------------------------------------------------------------
-  async addListener(eventName: string, listenerFunc: (data: unknown) => void): Promise<void> {
+  /**
+   * Must return a Capacitor-style PluginListenerHandle. Capacitor's
+   * registerPlugin wrapper does `T.remove = async () => L()` where L is set
+   * from the resolved handle's `.remove`. Returning void left L undefined and
+   * threw "L is not a function" on Electron/WASM (desktop extends this class).
+   */
+  async addListener(
+    eventName: string,
+    listenerFunc: (data: unknown) => void,
+  ): Promise<{ remove: () => Promise<void> }> {
     if (!this.listeners.has(eventName)) {
       this.listeners.set(eventName, new Set());
     }
     this.listeners.get(eventName)!.add(listenerFunc);
+    return {
+      remove: async () => {
+        this.listeners.get(eventName)?.delete(listenerFunc);
+      },
+    };
   }
 
   async removeAllListeners(): Promise<void> {

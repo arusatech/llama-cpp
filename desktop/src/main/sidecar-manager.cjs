@@ -64,6 +64,14 @@ function resolveBinaryPath(deps) {
   if (gpuBackend === 'vulkan') {
     names.push(`${platform}-${arch}-vulkan${ext}`);
   }
+  if (
+    gpuBackend === 'openvino'
+    || gpuBackend === 'openvino-cpu'
+    || gpuBackend === 'openvino-gpu'
+    || gpuBackend === 'openvino-npu'
+  ) {
+    names.push(`${platform}-${arch}-openvino${ext}`);
+  }
   names.push(`${platform}-${arch}${ext}`);
 
   const searchDirs = [];
@@ -115,17 +123,81 @@ function resolveBackendPluginDir(binaryPath, deps) {
   return path.dirname(binaryPath);
 }
 
-function buildSpawnEnv(binaryPath, backendDir, forceCpu, deps) {
+/**
+ * Stage a CPU-only copy of the sidecar in a clean directory.
+ * GGML auto-loads every plugin DLL sitting next to the exe, so a GPU plugin
+ * (e.g. ggml-vulkan.dll) in the staging folder makes even --no-gpu runs
+ * initialize the GPU and crash on broken drivers. Copying the CPU binary and
+ * only its CPU runtime libs into a separate folder guarantees a clean start.
+ */
+function stageCpuOnlySidecar(deps) {
   const platform = (deps && deps.platform) || process.platform;
+  const arch = (deps && deps.arch) || process.arch;
+  const _fs = (deps && deps.fs) || fs;
+
+  const srcBin = (deps && deps.binaryPath) || resolveBinaryPath({ ...deps, variant: 'cpu', gpuBackend: null });
+  _fs.accessSync(srcBin);
+  const srcDir = path.dirname(srcBin);
+  const destDir = path.join(os.tmpdir(), 'AcharyaAnnadata', 'sidecar-cpu', `${platform}-${arch}`);
+  _fs.mkdirSync(destDir, { recursive: true });
+
+  const wanted = [path.basename(srcBin)];
+  for (const name of _fs.readdirSync(srcDir)) {
+    if (/vulkan|cuda|rocm|hip|openvino|metal/i.test(name)) continue;
+    if (!/\.(dll|so(\.\d+)*|dylib)$/i.test(name)) continue;
+    try {
+      if (_fs.statSync(path.join(srcDir, name)).isFile()) wanted.push(name);
+    } catch (_) { /* skip */ }
+  }
+
+  for (const name of wanted) {
+    const from = path.join(srcDir, name);
+    const to = path.join(destDir, name);
+    try {
+      const src = _fs.statSync(from);
+      let copy = true;
+      try {
+        copy = _fs.statSync(to).size !== src.size;
+      } catch (_) { /* missing — copy */ }
+      if (copy) _fs.copyFileSync(from, to);
+    } catch (_) { /* best effort */ }
+  }
+
+  return path.join(destDir, path.basename(srcBin));
+}
+
+function prependLibPath(env, dir, platform) {
+  if (!dir) return;
+  if (platform === 'win32') {
+    env.PATH = `${dir};${env.PATH || ''}`;
+  } else {
+    env.LD_LIBRARY_PATH = `${dir}:${env.LD_LIBRARY_PATH || ''}`;
+    env.DYLD_LIBRARY_PATH = `${dir}:${env.DYLD_LIBRARY_PATH || ''}`;
+  }
+}
+
+function buildSpawnEnv(binaryPath, backendDir, forceCpu, deps, backendName) {
+  const platform = (deps && deps.platform) || process.platform;
+  const _fs = (deps && deps.fs) || fs;
   const env = { ...process.env };
 
-  if (backendDir) {
-    if (platform === 'win32') {
-      env.PATH = `${backendDir};${env.PATH || ''}`;
-    } else {
-      env.LD_LIBRARY_PATH = `${backendDir}:${env.LD_LIBRARY_PATH || ''}`;
-      env.DYLD_LIBRARY_PATH = `${backendDir}:${env.DYLD_LIBRARY_PATH || ''}`;
+  prependLibPath(env, backendDir, platform);
+
+  // OpenVINO redistributables staged next to the sidecar exe
+  if (binaryPath && !forceCpu) {
+    const ovRuntime = path.join(path.dirname(binaryPath), 'openvino-runtime');
+    if (_fs.existsSync(ovRuntime)) {
+      prependLibPath(env, ovRuntime, platform);
     }
+  }
+
+  // ggml-openvino reads GGML_OPENVINO_DEVICE (CPU|GPU|NPU); default in upstream is CPU.
+  if (!forceCpu && backendName === 'openvino-npu') {
+    env.GGML_OPENVINO_DEVICE = 'NPU';
+  } else if (!forceCpu && backendName === 'openvino-gpu') {
+    env.GGML_OPENVINO_DEVICE = 'GPU';
+  } else if (!forceCpu && backendName === 'openvino-cpu') {
+    env.GGML_OPENVINO_DEVICE = 'CPU';
   }
 
   if (forceCpu) {
@@ -159,6 +231,7 @@ function createSidecarManager(deps) {
   let client = null;
   let intentionalStop = false;
   let accelStderr = '';
+  let accelStdout = '';
   const listeners = [];
 
   function emit() {
@@ -186,23 +259,30 @@ function createSidecarManager(deps) {
       args.push('--threads', String(opts.n_threads));
     }
     const ngl = opts && opts.n_gpu_layers;
-    if (status.forceCpu || opts?.forceCpu) {
+    const cpuOnly = status.forceCpu || opts?.forceCpu;
+    if (cpuOnly) {
       args.push('--no-gpu');
     } else if (ngl != null && ngl >= 0) {
       args.push('--n-gpu-layers', String(ngl));
     } else if (status.backend && status.backend !== 'cpu') {
       args.push('--n-gpu-layers', '99');
     }
-    const backendDir = resolveBackendPluginDir(status.binaryPath || '', deps);
-    if (backendDir) {
-      args.push('--backend-dir', backendDir);
+    // CPU-only runs must not point at the GPU plugin dir (auto-loads ggml-vulkan).
+    if (!cpuOnly) {
+      const backendDir = resolveBackendPluginDir(status.binaryPath || '', deps);
+      if (backendDir) {
+        args.push('--backend-dir', backendDir);
+      }
     }
     return args;
   }
 
-  async function waitForHealth(port) {
+  async function waitForHealth(port, maxAttempts = HEALTH_MAX_ATTEMPTS, proc = null) {
     const c = _createClient(port);
-    for (let i = 0; i < HEALTH_MAX_ATTEMPTS; i++) {
+    for (let i = 0; i < maxAttempts; i++) {
+      // Do not keep waiting after this specific spawn has exited. In particular,
+      // this prevents the failed GPU start from later stopping its CPU retry.
+      if (proc && proc.exitCode != null) return false;
       try {
         const h = await c.health();
         if (h && h.status === 'ok') return true;
@@ -219,16 +299,34 @@ function createSidecarManager(deps) {
 
     const selection = options && options.selection;
     const modelPath = options && options.modelPath;
+    const wantForceCpu = !!(status.forceCpu || (options && options.forceCpu));
 
     if (status.running && status.port) {
       return { ok: true, port: status.port };
     }
 
-    const gpuBackend = selection && selection.gpuBackend;
-    const variant = (selection && selection.variant) || null;
-    status.variant = variant;
-    status.backend = gpuBackend || (selection && selection.type) || 'cpu';
-    status.binaryPath = _resolveBinaryPath({ ...deps, variant, gpuBackend });
+    let gpuBackend = selection && selection.gpuBackend;
+    let variant = (selection && selection.variant) || null;
+    // After a GPU crash, force the CPU binary — not the Vulkan binary with LLAMA_NO_GPU.
+    if (wantForceCpu) {
+      status.forceCpu = true;
+      gpuBackend = null;
+      variant = null;
+      status.backend = 'cpu';
+      status.variant = null;
+      // Spawn from a folder without GPU plugin DLLs: GGML auto-loads every
+      // plugin next to the exe, so ggml-vulkan.dll would crash CPU runs too.
+      try {
+        status.binaryPath = stageCpuOnlySidecar(deps);
+      } catch (err) {
+        _log.warn(`[sidecar-manager] CPU staging failed (${err}); using in-place binary`);
+        status.binaryPath = _resolveBinaryPath({ ...deps, variant: 'cpu', gpuBackend: null });
+      }
+    } else {
+      status.variant = variant;
+      status.backend = gpuBackend || (selection && selection.type) || 'cpu';
+      status.binaryPath = _resolveBinaryPath({ ...deps, variant, gpuBackend });
+    }
 
     try {
       _fs.accessSync(status.binaryPath);
@@ -240,21 +338,45 @@ function createSidecarManager(deps) {
     }
 
     const port = options?.port || _getRandomPort();
-    const backendDir = resolveBackendPluginDir(status.binaryPath, deps);
+    // CPU mode must not see the GPU plugin dir (PATH/LD_LIBRARY_PATH or --backend-dir).
+    const backendDir = status.forceCpu ? null : resolveBackendPluginDir(status.binaryPath, deps);
     const args = buildSpawnArgs(modelPath, port, options);
-    const env = buildSpawnEnv(status.binaryPath, backendDir, status.forceCpu, deps);
+    const env = buildSpawnEnv(status.binaryPath, backendDir, status.forceCpu, deps, status.backend);
 
     intentionalStop = false;
     accelStderr = '';
+    accelStdout = '';
+
+    _log.info('[sidecar-manager] spawn', {
+      backend: status.backend,
+      variant: status.variant,
+      binaryPath: status.binaryPath,
+      forceCpu: status.forceCpu,
+      openvinoDevice: env.GGML_OPENVINO_DEVICE || null,
+      port,
+      args,
+    });
 
     childProcess = _spawn(status.binaryPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env,
     });
+    const spawnedProcess = childProcess;
+    let startupComplete = false;
 
     status.pid = childProcess.pid;
     status.port = port;
+
+    // Drain stdout — leaving the pipe unread can deadlock the child when the
+    // OS pipe buffer fills. Keep a rolling tail for failure diagnostics.
+    childProcess.stdout.on('data', (chunk) => {
+      const text = String(chunk);
+      accelStdout = (accelStdout + text).slice(-65536);
+      if (process.env.LLAMA_SIDECAR_VERBOSE === '1') {
+        _log.info('[sidecar:stdout]', text.trim());
+      }
+    });
 
     childProcess.stderr.on('data', (chunk) => {
       const text = String(chunk);
@@ -264,7 +386,7 @@ function createSidecarManager(deps) {
       }
     });
 
-    childProcess.on('exit', (code) => {
+    spawnedProcess.on('exit', (code) => {
       if (intentionalStop) {
         status.running = false;
         status.pid = null;
@@ -275,14 +397,42 @@ function createSidecarManager(deps) {
       const gpuFail =
         vulkanStderrImpliesGpuFailure(accelStderr)
         || rocmStderrImpliesGpuFailure(accelStderr);
+      const usingGpu = !status.forceCpu && status.backend && status.backend !== 'cpu';
 
-      if (gpuFail && !status.forceCpu && options?.retryCpu !== false) {
-        _log.warn('[sidecar-manager] GPU init failed — retrying CPU-only');
+      // During startup, the awaiting start() call owns fallback/retry. Starting
+      // CPU here races the GPU health timer, which would later call stop() and
+      // kill the healthy CPU child.
+      if (!startupComplete) {
+        _log.warn(
+          `[sidecar-manager] Startup exit (${code})${usingGpu ? ` on ${status.backend}` : ''}`,
+        );
+        status.running = false;
+        status.pid = null;
+        emit();
+        return;
+      }
+
+      // Any unexpected exit while on a GPU backend → switch to the CPU binary once.
+      if (usingGpu && options?.retryCpu !== false) {
+        _log.warn(
+          `[sidecar-manager] ${gpuFail ? 'GPU init failed' : `Unexpected exit (${code}) on ${status.backend}`} — retrying CPU-only`,
+        );
         status.forceCpu = true;
         status.restartCount += 1;
         status.running = false;
+        status.pid = null;
         emit();
-        start({ ...options, forceCpu: true, retryCpu: false }).catch(() => {});
+        start({
+          ...options,
+          forceCpu: true,
+          retryCpu: false,
+          selection: {
+            type: 'sidecar-cpu',
+            gpuBackend: null,
+            variant: null,
+            reason: `CPU after ${status.backend || 'gpu'} failure (${code})`,
+          },
+        }).catch(() => {});
         return;
       }
 
@@ -302,18 +452,39 @@ function createSidecarManager(deps) {
       emit();
     });
 
-    const healthy = await waitForHealth(port);
+    // CPU model load + warmup can exceed 15 seconds even for a ~100 MB model.
+    const healthAttempts = wantForceCpu ? 240 : HEALTH_MAX_ATTEMPTS; // 120s CPU, 15s GPU
+    const healthy = await waitForHealth(port, healthAttempts, spawnedProcess);
     if (!healthy) {
-      await stop();
+      // Only stop this spawn. A newer retry must never be killed by an older
+      // start attempt finishing late.
+      if (childProcess === spawnedProcess) await stop();
       if (!status.forceCpu && options?.retryCpu !== false) {
         status.forceCpu = true;
-        return start({ ...options, forceCpu: true, retryCpu: false });
+        return start({
+          ...options,
+          forceCpu: true,
+          retryCpu: false,
+          selection: {
+            type: 'sidecar-cpu',
+            gpuBackend: null,
+            variant: null,
+            reason: 'CPU fallback after GPU startup failure',
+          },
+        });
       }
       status.permanentWasmFallback = true;
       emit();
-      return { ok: false, reason: 'health-check-failed' };
+      return {
+        ok: false,
+        reason: spawnedProcess.exitCode != null ? 'sidecar-exited-during-startup' : 'health-check-failed',
+        exitCode: spawnedProcess.exitCode,
+        stderr: accelStderr.slice(-4000),
+        stdout: accelStdout.slice(-4000),
+      };
     }
 
+    startupComplete = true;
     client = _createClient(port);
     status.running = true;
     emit();
@@ -361,4 +532,5 @@ module.exports = {
   resolveBinaryPath,
   resolveBackendPluginDir,
   getRandomPort,
+  stageCpuOnlySidecar,
 };

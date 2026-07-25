@@ -8,6 +8,8 @@ export type LlmErrorCode =
   | 'UNSUPPORTED_PLATFORM'
   | 'WASM_INIT_FAILED'
   | 'NATIVE_PLUGIN_UNAVAILABLE'
+  | 'SIDECAR_UNAVAILABLE'
+  | 'MODEL_QUANT_UNSUPPORTED'
   | 'INFERENCE_FAILED'
   | 'INVALID_REQUEST';
 
@@ -22,4 +24,3 @@ export class LlmError extends Error {
     this.meta = meta;
   }
 }
-

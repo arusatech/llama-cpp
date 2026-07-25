@@ -3,6 +3,7 @@ import { LlamaCppWeb } from './web';
 import { DesktopProvider } from './isomorphic/provider.desktop';
 import { getDesktopBridge } from './isomorphic/desktop.runtime';
 import { WebProvider } from './isomorphic/provider.web';
+import { LlmError } from './isomorphic/errors';
 
 const MODEL_DESC_DESKTOP = {
   desc: 'Desktop sidecar model',
@@ -32,6 +33,27 @@ const MODEL_DESC_DESKTOP = {
 function sidecarModelIdFromPath(modelPath: string): string {
   const base = modelPath.split(/[/\\]/).pop() || modelPath;
   return base.replace(/\.gguf$/i, '') || base;
+}
+
+const FORCED_NATIVE_OVERRIDES = new Set([
+  'sidecar-gpu',
+  'sidecar-npu',
+  'sidecar-cpu',
+  'vulkan',
+  'openvino-cpu',
+]);
+
+function formatSidecarFailure(result: {
+  reason?: string;
+  stderr?: string;
+  stdout?: string;
+}): string {
+  const reason = result.reason ?? 'sidecar-unavailable';
+  const stderr = result.stderr ? String(result.stderr).slice(-2000) : '';
+  const stdout = result.stdout ? String(result.stdout).slice(-1000) : '';
+  return [reason, stderr && `stderr: ${stderr}`, stdout && `stdout: ${stdout}`]
+    .filter(Boolean)
+    .join(' | ');
 }
 
 /**
@@ -72,6 +94,17 @@ export class LlamaCppDesktop extends LlamaCppWeb {
         embedding: params.embedding,
       });
       if (result?.ok && result.port) {
+        const sel = result.selection as
+          | { type?: string; gpuBackend?: string | null; variant?: string | null; reason?: string }
+          | undefined;
+        const pathLabel = sel?.gpuBackend || sel?.type || (result.gpuEnabled ? 'gpu' : 'cpu');
+        console.info(`[LlamaCppDesktop] initContext → sidecar (${pathLabel})`, {
+          port: result.port,
+          gpuEnabled: result.gpuEnabled,
+          selection: sel,
+          modelId,
+          embedding: !!params.embedding,
+        });
         this.desktopProvider.setSidecarPort(result.port);
         await this.desktopProvider.loadModel({
           modelId,
@@ -91,11 +124,75 @@ export class LlamaCppDesktop extends LlamaCppWeb {
           model: MODEL_DESC_DESKTOP,
         };
       }
+
+      const failDetail = formatSidecarFailure(result ?? {});
+      console.warn('[LlamaCppDesktop] sidecar unavailable:', failDetail);
+
+      let override: string | null = null;
+      if (bridge.getBackendOverride) {
+        try {
+          override = await bridge.getBackendOverride();
+        } catch {
+          override = null;
+        }
+      }
+      const forcedNative = !!override && FORCED_NATIVE_OVERRIDES.has(override);
+      if (forcedNative) {
+        throw new LlmError(
+          'SIDECAR_UNAVAILABLE',
+          `Native sidecar required by override '${override}' but failed: ${failDetail}`,
+          {
+            reason: result?.reason,
+            stderr: result?.stderr,
+            stdout: result?.stdout,
+            selection: result?.selection,
+            override,
+          },
+        );
+      }
+
+      // Sidecar unavailable — fall back to a real WASM WebProvider (not DesktopProvider,
+      // which would call ensureSidecar again and previously threw permanent-wasm-fallback).
+      console.info('[LlamaCppDesktop] initContext → WASM CPU fallback', {
+        reason: result?.reason,
+        selection: result?.selection,
+        modelId,
+      });
+      const wasmProvider = new WebProvider();
+      const prevProvider = (this as unknown as { provider: WebProvider }).provider;
+      (this as unknown as { provider: WebProvider }).provider = wasmProvider;
+      try {
+        const fallback = await super.initContext({ contextId, params });
+        this.sidecarActive = false;
+        const reasonNoGPU =
+          result?.reasonNoGpu
+          || (result?.reason ? `Sidecar unavailable: ${result.reason}` : '')
+          || failDetail
+          || 'Sidecar unavailable — WASM fallback';
+        return {
+          ...fallback,
+          gpu: false,
+          reasonNoGPU,
+        };
+      } catch (err) {
+        (this as unknown as { provider: WebProvider }).provider = prevProvider;
+        throw err;
+      }
     }
 
-    const fallback = await super.initContext({ contextId, params });
-    this.sidecarActive = false;
-    return fallback;
+    // No bridge — WASM path
+    console.info('[LlamaCppDesktop] initContext → WASM CPU (no desktop bridge)', { modelId });
+    const wasmProvider = new WebProvider();
+    const prevProvider = (this as unknown as { provider: WebProvider }).provider;
+    (this as unknown as { provider: WebProvider }).provider = wasmProvider;
+    try {
+      const fallback = await super.initContext({ contextId, params });
+      this.sidecarActive = false;
+      return fallback;
+    } catch (err) {
+      (this as unknown as { provider: WebProvider }).provider = prevProvider;
+      throw err;
+    }
   }
 
   async setContextLimit(opts: { limit: number }): Promise<void> {
@@ -134,6 +231,7 @@ export class LlamaCppDesktop extends LlamaCppWeb {
       this.sidecarActive = true;
       return { running: true };
     }
+    console.warn('[LlamaCppDesktop] startNativeLlamaServer failed:', formatSidecarFailure(result ?? {}));
     return { running: false };
   }
 

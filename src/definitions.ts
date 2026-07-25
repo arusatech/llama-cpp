@@ -829,7 +829,10 @@ export interface LlamaCppPlugin {
 
   isNativeLlamaServerRunning(): Promise<{ running: boolean }>;
 
-  // Events
-  addListener(eventName: string, listenerFunc: (data: any) => void): Promise<void>;
+  // Events — return value must include `.remove` (Capacitor PluginListenerHandle)
+  addListener(
+    eventName: string,
+    listenerFunc: (data: any) => void,
+  ): Promise<{ remove: () => Promise<void> }>;
   removeAllListeners(eventName: string): Promise<void>;
 }

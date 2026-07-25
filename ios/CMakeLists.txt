@@ -1,119 +1,84 @@
+# =============================================================================
+# iOS framework — device / default (arm64)
+#
+# Links upstream llama.cpp (third_party/llama.cpp) with GGML_METAL + project
+# adapters under native/. Legacy flat cpp/ and ios/metal-embed.cmake are not used;
+# upstream ggml-metal embeds shaders when GGML_METAL_EMBED_LIBRARY=ON.
+# =============================================================================
+
 cmake_minimum_required(VERSION 3.16)
 project(llama-cpp VERSION 1.0.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# iOS specific settings for ARM64 devices
 set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0)
 set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
 
-# Metal first (embedded shader source); CPU + Accelerate always available as fallback.
-add_definitions(
-    -DNDEBUG
-    -DO3
-    -DLM_GGML_USE_CPU
-    -DLM_GGML_USE_ACCELERATE
-    -DLM_GGML_USE_METAL
-    -DLM_GGML_METAL_EMBED_LIBRARY
-    -DLM_GGML_METAL_USE_BF16
-)
+set(LLAMA_CPP_PRO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(NATIVE_DIR "${LLAMA_CPP_PRO_ROOT}/native")
 
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../cpp)
+set(LLAMA_CPP_UPSTREAM "" CACHE PATH "Path to upstream llama.cpp (default: third_party/llama.cpp)")
+if(NOT LLAMA_CPP_UPSTREAM AND DEFINED ENV{LLAMA_CPP_UPSTREAM})
+    set(LLAMA_CPP_UPSTREAM "$ENV{LLAMA_CPP_UPSTREAM}")
+endif()
+if(NOT LLAMA_CPP_UPSTREAM)
+    set(_DEFAULT_UPSTREAM "${LLAMA_CPP_PRO_ROOT}/third_party/llama.cpp")
+    if(EXISTS "${_DEFAULT_UPSTREAM}/CMakeLists.txt")
+        set(LLAMA_CPP_UPSTREAM "${_DEFAULT_UPSTREAM}")
+    endif()
+endif()
+if(NOT LLAMA_CPP_UPSTREAM OR NOT EXISTS "${LLAMA_CPP_UPSTREAM}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "LLAMA_CPP_UPSTREAM not found. Expected ${LLAMA_CPP_PRO_ROOT}/third_party/llama.cpp "
+        "(git submodule) or set -DLLAMA_CPP_UPSTREAM=/path/to/llama.cpp. "
+        "See docs/NATIVE_UPSTREAM.md — legacy cpp/ is no longer used for iOS builds.")
+endif()
+if(NOT EXISTS "${NATIVE_DIR}/cap-llama.cpp")
+    message(FATAL_ERROR "native/ adapters not found at ${NATIVE_DIR}")
+endif()
+message(STATUS "Upstream llama.cpp: ${LLAMA_CPP_UPSTREAM}")
+message(STATUS "Native adapters: ${NATIVE_DIR}")
 
-enable_language(ASM)
-include(${CMAKE_CURRENT_SOURCE_DIR}/metal-embed.cmake)
+# Single framework binary: statically link ggml/llama into the shared framework
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_CPU ON CACHE BOOL "" FORCE)
+set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+set(GGML_METAL ON CACHE BOOL "" FORCE)
+set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+set(GGML_ACCELERATE ON CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
-# ARM64‑tuned ggml sources
-set(SOURCE_FILES_ARCH
-    ${SOURCE_DIR}/ggml-cpu/arch/arm/quants.c
-    ${SOURCE_DIR}/ggml-cpu/arch/arm/repack.cpp
-)
+add_subdirectory("${LLAMA_CPP_UPSTREAM}" "${CMAKE_BINARY_DIR}/llama-upstream")
 
-# Define public headers
 set(PUBLIC_HEADERS
-    ${SOURCE_DIR}/cap-llama.h
-    ${SOURCE_DIR}/cap-completion.h
-    ${SOURCE_DIR}/cap-embedding.h
-    ${SOURCE_DIR}/cap-ios-bridge.h
-    ${SOURCE_DIR}/cap-tts.h
-    ${SOURCE_DIR}/llama.h
-    ${SOURCE_DIR}/ggml.h
+    ${NATIVE_DIR}/cap-llama.h
+    ${NATIVE_DIR}/cap-completion.h
+    ${NATIVE_DIR}/cap-embedding.h
+    ${NATIVE_DIR}/cap-ios-bridge.h
+    ${NATIVE_DIR}/cap-tts.h
+    ${LLAMA_CPP_UPSTREAM}/include/llama.h
+    ${LLAMA_CPP_UPSTREAM}/ggml/include/ggml.h
 )
 
-# Create library target
 add_library(llama-cpp SHARED
-    ${SOURCE_DIR}/ggml.c
-    ${SOURCE_DIR}/ggml-alloc.c
-    ${SOURCE_DIR}/ggml-backend.cpp
-    ${SOURCE_DIR}/ggml-backend-reg.cpp
-    ${SOURCE_DIR}/ggml-cpu/amx/amx.cpp
-    ${SOURCE_DIR}/ggml-cpu/amx/mmq.cpp
-    ${SOURCE_DIR}/ggml-cpu/ggml-cpu.c
-    ${SOURCE_DIR}/ggml-cpu/ggml-cpu.cpp
-    ${SOURCE_DIR}/ggml-cpu/quants.c
-    ${SOURCE_DIR}/ggml-cpu/traits.cpp
-    ${SOURCE_DIR}/ggml-cpu/repack.cpp
-    ${SOURCE_DIR}/ggml-cpu/unary-ops.cpp
-    ${SOURCE_DIR}/ggml-cpu/binary-ops.cpp
-    ${SOURCE_DIR}/ggml-cpu/vec.cpp
-    ${SOURCE_DIR}/ggml-cpu/ops.cpp
-    ${SOURCE_DIR}/ggml-metal.m
-    ${SOURCE_DIR}/ggml-opt.cpp
-    ${SOURCE_DIR}/ggml-threading.cpp
-    ${SOURCE_DIR}/ggml-quants.c
-    ${SOURCE_DIR}/gguf.cpp
-    ${SOURCE_DIR}/log.cpp
-    ${SOURCE_DIR}/llama-impl.cpp
-    ${SOURCE_DIR}/llama-grammar.cpp
-    ${SOURCE_DIR}/llama-sampling.cpp
-    ${SOURCE_DIR}/llama-vocab.cpp
-    ${SOURCE_DIR}/llama-adapter.cpp
-    ${SOURCE_DIR}/llama-chat.cpp
-    ${SOURCE_DIR}/llama-context.cpp
-    ${SOURCE_DIR}/llama-arch.cpp
-    ${SOURCE_DIR}/llama-batch.cpp
-    ${SOURCE_DIR}/llama-cparams.cpp
-    ${SOURCE_DIR}/llama-hparams.cpp
-    ${SOURCE_DIR}/llama.cpp
-    ${SOURCE_DIR}/llama-model.cpp
-    ${SOURCE_DIR}/llama-model-loader.cpp
-    ${SOURCE_DIR}/llama-model-saver.cpp
-    ${SOURCE_DIR}/llama-mmap.cpp
-    ${SOURCE_DIR}/llama-kv-cache.cpp
-    ${SOURCE_DIR}/llama-kv-cache-iswa.cpp
-    ${SOURCE_DIR}/llama-memory-hybrid.cpp
-    ${SOURCE_DIR}/llama-memory-recurrent.cpp
-    ${SOURCE_DIR}/llama-memory.cpp
-    ${SOURCE_DIR}/llama-io.cpp
-    ${SOURCE_DIR}/llama-graph.cpp
-    ${SOURCE_DIR}/sampling.cpp
-    ${SOURCE_DIR}/unicode-data.cpp
-    ${SOURCE_DIR}/unicode.cpp
-    ${SOURCE_DIR}/common.cpp
-    ${SOURCE_DIR}/chat.cpp
-    # Additional sources required for JSON parsing, chat parser, and mtmd tools
-    ${SOURCE_DIR}/chat-parser.cpp
-    ${SOURCE_DIR}/regex-partial.cpp
-    ${SOURCE_DIR}/json-partial.cpp
-    ${SOURCE_DIR}/json-schema-to-grammar.cpp
-    ${SOURCE_DIR}/anyascii.c
-    ${SOURCE_DIR}/tools/mtmd/mtmd.cpp
-    ${SOURCE_DIR}/tools/mtmd/mtmd-helper.cpp
-    ${SOURCE_DIR}/tools/mtmd/mtmd-audio.cpp
-    ${SOURCE_DIR}/tools/mtmd/clip.cpp
-    ${SOURCE_DIR}/cap-llama.cpp
-    ${SOURCE_DIR}/cap-completion.cpp
-    ${SOURCE_DIR}/cap-tts.cpp
-    ${SOURCE_DIR}/cap-embedding.cpp
-    ${SOURCE_DIR}/cap-ios-bridge.cpp
-    ${SOURCE_DIR}/cap-native-server.cpp
-    ${SOURCE_DIR}/vendor/cpp-httplib/httplib.cpp
-    ${SOURCE_FILES_ARCH}
-    ${METALLIB_EMBED_ASM}
+    ${NATIVE_DIR}/anyascii.c
+    ${NATIVE_DIR}/cap-llama.cpp
+    ${NATIVE_DIR}/cap-completion.cpp
+    ${NATIVE_DIR}/cap-tts.cpp
+    ${NATIVE_DIR}/cap-embedding.cpp
+    ${NATIVE_DIR}/cap-ios-bridge.cpp
+    ${NATIVE_DIR}/cap-native-server.cpp
 )
 
-# Set target properties
 set_target_properties(llama-cpp PROPERTIES
     FRAMEWORK TRUE
     FRAMEWORK_VERSION A
@@ -124,19 +89,37 @@ set_target_properties(llama-cpp PROPERTIES
     XCODE_ATTRIBUTE_DEVELOPMENT_TEAM ""
     XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH NO
     XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+    PUBLIC_HEADER "${PUBLIC_HEADERS}"
 )
 
-# Include directories
 target_include_directories(llama-cpp PRIVATE
-    ${SOURCE_DIR}
-    ${SOURCE_DIR}/ggml-cpu
-    ${SOURCE_DIR}/tools/mtmd
-    ${SOURCE_DIR}/vendor/cpp-httplib
+    ${NATIVE_DIR}
+    ${NATIVE_DIR}/vendor/cpp-httplib
+    ${LLAMA_CPP_UPSTREAM}/include
+    ${LLAMA_CPP_UPSTREAM}/ggml/include
+    ${LLAMA_CPP_UPSTREAM}/common
+    ${LLAMA_CPP_UPSTREAM}/vendor
+    ${LLAMA_CPP_UPSTREAM}/tools/mtmd
 )
 
-# ARM64: rely on Clang's default tuning; no x86‑specific -march flags here
+target_compile_definitions(llama-cpp PRIVATE NDEBUG)
 
-# Link frameworks via linker flags
+find_package(Threads REQUIRED)
+target_link_libraries(llama-cpp PRIVATE
+    Threads::Threads
+    llama
+    ggml
+    llama-common
+    mtmd
+)
+
+if(TARGET cpp-httplib)
+    target_link_libraries(llama-cpp PRIVATE cpp-httplib)
+else()
+    target_sources(llama-cpp PRIVATE ${NATIVE_DIR}/vendor/cpp-httplib/httplib.cpp)
+endif()
+
+# Upstream ggml-metal already links Metal/MetalKit/Foundation; Accelerate for CPU BLAS.
 target_link_options(llama-cpp PRIVATE
     "-Wl,-framework,Accelerate"
     "-Wl,-framework,Metal"
@@ -145,17 +128,7 @@ target_link_options(llama-cpp PRIVATE
     "-Wl,-framework,CoreGraphics"
 )
 
-# Public headers
-set_target_properties(llama-cpp PROPERTIES
-    PUBLIC_HEADER "${PUBLIC_HEADERS}"
-)
+install(TARGETS llama-cpp FRAMEWORK DESTINATION .)
 
-# Install rules
-install(TARGETS llama-cpp
-    FRAMEWORK DESTINATION .
-)
-
-message(STATUS "Building llama-cpp for ARM64 (devices)")
-message(STATUS "Source directory: ${SOURCE_DIR}")
-message(STATUS "Architecture: arm64")
-
+message(STATUS "Building llama-cpp iOS (arm64) against upstream + native/ (GGML_METAL)")
+message(STATUS "Upstream: ${LLAMA_CPP_UPSTREAM}")

@@ -82,11 +82,11 @@ annadata-llama-cpp/
 | **NVIDIA** | GPU | CUDA | `cuda` | `nvcuda.dll` / `libcuda.so` |
 | **AMD** | GPU | ROCm/HIP | `rocm` | `amdhip64.dll` / `libamdhip64.so` |
 | **Cross-vendor** | GPU | Vulkan | `vulkan-openblas` | `vulkan-1.dll` / `libvulkan.so` |
-| **Intel** | GPU / NPU | OpenVINO | `cuda-openvino` | `openvino.dll` / `libopenvino.so` |
+| **Intel** | GPU / NPU | OpenVINO | `openvino` | `openvino.dll` / `libopenvino.so` |
 | **All** | CPU | OpenBLAS / Accelerate | `openblas`, `cpu` | Always available |
 | **All** | CPU | WASM | — | `dist/wasm/llama_engine.wasm` |
 
-**Priority (auto selection):** NPU → GPU (Vulkan on Win/Linux, Metal on macOS) → native CPU → WASM
+**Priority (auto selection):** On macOS, CoreML NPU → Metal GPU → WASM. On Windows/Linux, GPU (Vulkan / CUDA / ROCm) → OpenVINO NPU (only when an `openvino` sidecar variant is available) → native CPU → WASM. Override `sidecar-npu` still forces OpenVINO when probed.
 
 ---
 

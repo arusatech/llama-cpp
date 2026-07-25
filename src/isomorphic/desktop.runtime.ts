@@ -49,11 +49,20 @@ export type DesktopBridge = {
     gpuBackend?: string | null;
     reasonNoGpu?: string;
     reason?: string;
+    stderr?: string;
+    stdout?: string;
+    selection?: {
+      type?: string;
+      gpuBackend?: string | null;
+      variant?: string | null;
+      reason?: string;
+    };
   }>;
   stopSidecar?: () => Promise<void>;
   getSidecarStatus?: () => Promise<{ running: boolean; port?: number | null; backend?: string | null }>;
   getBackendStatus?: () => Promise<Record<string, unknown>>;
   setBackendOverride?: (value: string) => Promise<void>;
+  getBackendOverride?: () => Promise<string>;
   getMemorySnapshot?: () => Promise<MemorySnapshot>;
 };
 

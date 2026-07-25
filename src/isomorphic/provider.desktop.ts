@@ -15,8 +15,24 @@ import { LlmError } from './errors';
 import { DefaultModelScheduler } from './model.scheduler';
 import { WASM_MAX_CONCURRENT_MODELS } from './wasmMemoryPolicy';
 import type { DetokenizeResult, TokenizeResult } from '../workers/wasm.engine';
+import { preflightGgufFromPath } from './gguf-preflight';
 
 const MAX_MODELS = WASM_MAX_CONCURRENT_MODELS;
+
+async function maybeLogGgufPreflight(modelPath: string): Promise<void> {
+  if (!modelPath || !/\.gguf$/i.test(modelPath)) return;
+  // Absolute / relative filesystem paths only (skip URLs / abstract ids).
+  if (/^https?:\/\//i.test(modelPath)) return;
+  try {
+    const pre = await preflightGgufFromPath(modelPath);
+    if (!pre) return;
+    for (const w of pre.warnings) {
+      console.warn('[gguf-preflight]', w);
+    }
+  } catch (err) {
+    console.warn('[gguf-preflight] skipped:', err instanceof Error ? err.message : err);
+  }
+}
 
 /**
  * Desktop LLM provider: native sidecar (HTTP) for GPU/CPU inference;
@@ -104,9 +120,9 @@ export class DesktopProvider extends WebProvider {
     }
   }
 
-  private async ensureSidecarProcess(opts?: InitializeOptions): Promise<void> {
+  private async ensureSidecarProcess(opts?: InitializeOptions): Promise<boolean> {
     if (this.sidecarAvailable()) {
-      return;
+      return true;
     }
     const bridge = getDesktopBridge();
     if (!bridge?.ensureSidecar) {
@@ -127,12 +143,21 @@ export class DesktopProvider extends WebProvider {
     }
     const result = await bridge.ensureSidecar(payload);
     if (!result?.ok || !result.port) {
-      throw new LlmError(
-        'NATIVE_PLUGIN_UNAVAILABLE',
-        `Sidecar failed to start: ${result?.reason ?? 'unknown'}`,
-      );
+      const reason = result?.reason ?? 'sidecar-unavailable';
+      const stderrTail = result?.stderr ? String(result.stderr).slice(-2000) : '';
+      const stdoutTail = result?.stdout ? String(result.stdout).slice(-1000) : '';
+      const detail = [reason, stderrTail && `stderr: ${stderrTail}`, stdoutTail && `stdout: ${stdoutTail}`]
+        .filter(Boolean)
+        .join(' | ');
+      throw new LlmError('SIDECAR_UNAVAILABLE', `Desktop sidecar unavailable: ${detail}`, {
+        reason,
+        stderr: stderrTail || undefined,
+        stdout: stdoutTail || undefined,
+        selection: result?.selection,
+      });
     }
     this.setSidecarPort(result.port);
+    return true;
   }
 
   private requireSidecarModel(modelId: string): void {
@@ -239,7 +264,16 @@ export class DesktopProvider extends WebProvider {
 
   override async initialize(opts: InitializeOptions): Promise<void> {
     if (!this.sidecarAvailable()) {
-      await this.ensureSidecarProcess(opts);
+      try {
+        await this.ensureSidecarProcess(opts);
+      } catch (err) {
+        if (err instanceof LlmError && err.code === 'SIDECAR_UNAVAILABLE') {
+          console.warn('[DesktopProvider] sidecar unavailable, falling back to WASM:', err.message);
+          await super.initialize(opts);
+          return;
+        }
+        throw err;
+      }
     }
     if (!this.sidecarAvailable()) {
       await super.initialize(opts);
@@ -253,13 +287,25 @@ export class DesktopProvider extends WebProvider {
       throw new LlmError('INVALID_REQUEST', 'modelId is required');
     }
 
-    await this.ensureSidecarProcess(opts);
+    if (!this.sidecarAvailable()) {
+      try {
+        await this.ensureSidecarProcess(opts);
+      } catch (err) {
+        if (err instanceof LlmError && err.code === 'SIDECAR_UNAVAILABLE') {
+          console.warn('[DesktopProvider] sidecar unavailable, falling back to WASM:', err.message);
+          await super.loadModel(opts);
+          return;
+        }
+        throw err;
+      }
+    }
     if (!this.sidecarAvailable()) {
       await super.loadModel(opts);
       return;
     }
 
     const modelPath = opts.modelPath ?? opts.modelId;
+    await maybeLogGgufPreflight(modelPath);
     // Never register absolute filesystem paths as sidecar ids (DELETE route is single-segment).
     const modelId = (() => {
       const raw = opts.modelId;

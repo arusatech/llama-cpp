@@ -110,13 +110,27 @@ function registerLlamaDesktopIpc(opts) {
     const { selection } = detectBackend(opts && opts.deps);
     lastSelection = selection;
 
+    const invokeLabel = selection.gpuBackend || selection.type || 'unknown';
+    console.info(`[llama-desktop] ensureSidecar → ${invokeLabel}`, {
+      type: selection.type,
+      gpuBackend: selection.gpuBackend,
+      variant: selection.variant,
+      reason: selection.reason,
+      modelId: payload && payload.modelId,
+      embedding: !!(payload && payload.embedding),
+    });
+
     if (selection.type === 'wasm-cpu') {
+      console.info('[llama-desktop] backend path = WASM CPU (no sidecar spawn)');
       return { ok: false, reason: 'wasm-fallback', selection };
     }
 
     const st = manager.getStatus();
     let result = { ok: true, port: st.port };
     if (!st.running) {
+      console.info(`[llama-desktop] spawning sidecar for ${invokeLabel}`, {
+        variant: selection.variant,
+      });
       result = await manager.start({
         modelPath: payload && payload.modelPath,
         modelId: payload && payload.modelId,
@@ -126,20 +140,35 @@ function registerLlamaDesktopIpc(opts) {
         n_threads: payload && payload.n_threads,
         retryCpu: true,
       });
+    } else {
+      console.info(
+        `[llama-desktop] reusing sidecar port=${st.port} backend=${st.backend || invokeLabel}`,
+      );
     }
 
     if (!result.ok) {
+      console.warn('[llama-desktop] ensureSidecar failed', {
+        reason: result.reason,
+        selection,
+      });
       return { ...result, selection };
     }
 
     const gpuEnabled =
       selection.type === 'sidecar-gpu' || selection.type === 'sidecar-npu';
+    console.info(
+      `[llama-desktop] ensureSidecar OK → ${invokeLabel} port=${result.port} gpuEnabled=${gpuEnabled}`,
+    );
     return {
       ok: true,
       port: result.port,
       gpuEnabled,
       gpuBackend: selection.gpuBackend,
-      reasonNoGpu: gpuEnabled ? undefined : 'Native CPU inference (OpenBLAS / Accelerate)',
+      reasonNoGpu: gpuEnabled
+        ? undefined
+        : (selection.gpuBackend === 'openvino-cpu'
+          ? 'OpenVINO CPU inference (GGML_OPENVINO_DEVICE=CPU)'
+          : 'Native CPU inference (OpenBLAS / Accelerate)'),
       selection,
     };
   });
@@ -167,7 +196,14 @@ function registerLlamaDesktopIpc(opts) {
   });
 
   ipcMain.handle(CHANNEL_OVERRIDE, async (_evt, value) => {
+    console.info(`[llama-desktop] setBackendOverride → ${value}`);
     setUserOverride(value, opts && opts.deps);
+    try {
+      await manager.stop();
+      console.info('[llama-desktop] stopped sidecar after backend override change');
+    } catch (err) {
+      console.warn('[llama-desktop] stop after override failed', err);
+    }
     return { ok: true };
   });
 
