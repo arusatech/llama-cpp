@@ -65,6 +65,37 @@ describe('desktop backend-selector', () => {
     expect(sel.variant).toBe('openvino');
   });
 
+  it('listBackendOptions enables Vulkan and disables OpenVINO when only Vulkan probed', () => {
+    const {
+      listBackendOptions,
+    } = require('../../../desktop/src/main/backend-selector.cjs');
+    const opts = listBackendOptions(probeWithVulkan, {
+      platform: 'win32',
+      availableVariants: ['vulkan', 'cpu', 'openvino'],
+    });
+    const byValue = Object.fromEntries(opts.map((o: { value: string }) => [o.value, o]));
+    expect(byValue.auto.available).toBe(true);
+    expect(byValue.vulkan.available).toBe(true);
+    expect(byValue['openvino-cpu'].available).toBe(false);
+    expect(byValue['wasm-cpu'].available).toBe(true);
+    expect(byValue['sidecar-cpu'].available).toBe(true);
+    expect(byValue.metal).toBeUndefined();
+  });
+
+  it('listBackendOptions enables OpenVINO CPU when runtime probed', () => {
+    const {
+      listBackendOptions,
+    } = require('../../../desktop/src/main/backend-selector.cjs');
+    const opts = listBackendOptions(probeVulkanAndOpenvinoNpu, {
+      platform: 'win32',
+      availableVariants: ['vulkan', 'openvino', 'cpu'],
+    });
+    const ovCpu = opts.find((o: { value: string }) => o.value === 'openvino-cpu');
+    const ovNpu = opts.find((o: { value: string }) => o.value === 'openvino-npu');
+    expect(ovCpu?.available).toBe(true);
+    expect(ovNpu?.available).toBe(true);
+  });
+
   it('maps CUDA / ROCm / Metal / OpenVINO to real variants', () => {
     expect(backendToVariant('cuda', 'win32')).toBe('cuda');
     expect(backendToVariant('rocm', 'linux')).toBe('rocm');

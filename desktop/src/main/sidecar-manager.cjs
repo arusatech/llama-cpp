@@ -25,6 +25,7 @@ function vulkanStderrImpliesGpuFailure(buf) {
     /VK_ERROR_[A-Z0-9_]+/i.test(buf)
     || (/ggml_vulkan/i.test(buf) && /error|fail/i.test(buf))
     || /Vulkan.*(fail|error)/i.test(buf)
+    || /llama_decode:\s*failed to decode/i.test(buf)
   );
 }
 
@@ -36,6 +37,22 @@ function rocmStderrImpliesGpuFailure(buf) {
     || /ROCm error/i.test(buf)
     || /hipblas/i.test(buf)
   );
+}
+
+/** Human-readable Windows NTSTATUS / common exit codes for sidecar crashes. */
+function describeExitCode(code) {
+  if (code == null) return null;
+  const u = code < 0 ? code + 0x100000000 : code;
+  const known = {
+    0xC0000005: 'ACCESS_VIOLATION (native segfault — often Intel iGPU Vulkan during model/embed load)',
+    0xC0000135: 'DLL_NOT_FOUND (missing runtime — check OpenVINO/Vulkan PATH)',
+    0xC000007B: 'BAD_IMAGE_FORMAT (32/64-bit DLL mismatch)',
+    0xC0000409: 'STACK_BUFFER_OVERRUN',
+    0xC00000FD: 'STACK_OVERFLOW',
+  };
+  if (known[u]) return `${known[u]} [0x${u.toString(16).toUpperCase()}]`;
+  if (u > 0xC0000000) return `NTSTATUS 0x${u.toString(16).toUpperCase()}`;
+  return null;
 }
 
 /**
@@ -191,6 +208,20 @@ function buildSpawnEnv(binaryPath, backendDir, forceCpu, deps, backendName) {
     }
   }
 
+  // System-installed OpenVINO (incl. winget/MSIX under WindowsApps) — the
+  // sidecar can't load openvino.dll unless its bin dirs are on PATH.
+  if (!forceCpu && /^openvino/.test(backendName || '')) {
+    try {
+      const { findOpenVinoRuntime } = require('./gpu-probe.cjs');
+      const ov = findOpenVinoRuntime(deps);
+      if (ov.found) {
+        for (const dir of ov.binDirs) {
+          prependLibPath(env, dir, platform);
+        }
+      }
+    } catch (_) { /* probe unavailable — rely on staged runtime */ }
+  }
+
   // ggml-openvino reads GGML_OPENVINO_DEVICE (CPU|GPU|NPU); default in upstream is CPU.
   if (!forceCpu && backendName === 'openvino-npu') {
     env.GGML_OPENVINO_DEVICE = 'NPU';
@@ -214,6 +245,17 @@ function createSidecarManager(deps) {
   const _resolveBinaryPath = (deps && deps.resolveBinaryPath) || resolveBinaryPath;
   const _getRandomPort = (deps && deps.getRandomPort) || getRandomPort;
   const _log = (deps && deps.log) || console;
+  /** Optional observer for sidecar lifecycle/stderr (any backend). */
+  const _onEvent = (deps && typeof deps.onSidecarEvent === 'function')
+    ? deps.onSidecarEvent
+    : null;
+
+  function notify(event) {
+    if (!_onEvent) return;
+    try {
+      _onEvent({ at: new Date().toISOString(), ...event });
+    } catch (_) { /* observer errors must not break the manager */ }
+  }
 
   let status = {
     running: false,
@@ -299,6 +341,16 @@ function createSidecarManager(deps) {
 
     const selection = options && options.selection;
     const modelPath = options && options.modelPath;
+    // Explicit GPU/NPU selection clears a sticky CPU fallback from a prior crash,
+    // unless this start() call itself requested forceCpu (retry path).
+    if (selection && selection.gpuBackend && !(options && options.forceCpu)) {
+      if (status.forceCpu) {
+        _log.info(
+          `[sidecar-manager] clearing sticky forceCpu for explicit selection ${selection.gpuBackend}`,
+        );
+      }
+      status.forceCpu = false;
+    }
     const wantForceCpu = !!(status.forceCpu || (options && options.forceCpu));
 
     if (status.running && status.port) {
@@ -356,6 +408,15 @@ function createSidecarManager(deps) {
       port,
       args,
     });
+    notify({
+      type: 'spawn',
+      backend: status.backend,
+      variant: status.variant,
+      binaryPath: status.binaryPath,
+      forceCpu: status.forceCpu,
+      openvinoDevice: env.GGML_OPENVINO_DEVICE || null,
+      port,
+    });
 
     childProcess = _spawn(status.binaryPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -367,6 +428,23 @@ function createSidecarManager(deps) {
 
     status.pid = childProcess.pid;
     status.port = port;
+
+    // Batch stderr for observers so token-level logs don't flood the app log.
+    let stderrBatch = '';
+    let stderrTimer = null;
+    const spawnBackend = status.backend;
+    const flushStderrBatch = () => {
+      stderrTimer = null;
+      if (!stderrBatch) return;
+      const text = stderrBatch.slice(-8192);
+      stderrBatch = '';
+      notify({ type: 'stderr', backend: spawnBackend, text });
+    };
+    const queueStderr = (text) => {
+      if (!_onEvent) return;
+      stderrBatch += text;
+      if (!stderrTimer) stderrTimer = setTimeout(flushStderrBatch, 1500);
+    };
 
     // Drain stdout — leaving the pipe unread can deadlock the child when the
     // OS pipe buffer fills. Keep a rolling tail for failure diagnostics.
@@ -381,12 +459,16 @@ function createSidecarManager(deps) {
     childProcess.stderr.on('data', (chunk) => {
       const text = String(chunk);
       accelStderr = (accelStderr + text).slice(-65536);
+      queueStderr(text);
       if (process.env.LLAMA_SIDECAR_VERBOSE === '1') {
         _log.info('[sidecar]', text.trim());
       }
     });
 
     spawnedProcess.on('exit', (code) => {
+      if (stderrTimer) clearTimeout(stderrTimer);
+      flushStderrBatch();
+
       if (intentionalStop) {
         status.running = false;
         status.pid = null;
@@ -406,6 +488,14 @@ function createSidecarManager(deps) {
         _log.warn(
           `[sidecar-manager] Startup exit (${code})${usingGpu ? ` on ${status.backend}` : ''}`,
         );
+        notify({
+          type: 'exit',
+          backend: spawnBackend,
+          code,
+          exitCodeLabel: describeExitCode(code),
+          reason: gpuFail ? 'gpu-init-failed' : 'startup-exit',
+          stderrTail: accelStderr.slice(-4000),
+        });
         status.running = false;
         status.pid = null;
         emit();
@@ -417,6 +507,20 @@ function createSidecarManager(deps) {
         _log.warn(
           `[sidecar-manager] ${gpuFail ? 'GPU init failed' : `Unexpected exit (${code}) on ${status.backend}`} — retrying CPU-only`,
         );
+        notify({
+          type: 'exit',
+          backend: spawnBackend,
+          code,
+          exitCodeLabel: describeExitCode(code),
+          reason: gpuFail ? 'gpu-init-failed' : 'unexpected-exit',
+          stderrTail: accelStderr.slice(-4000),
+        });
+        notify({
+          type: 'fallback',
+          from: spawnBackend,
+          to: 'cpu',
+          reason: `CPU after ${status.backend || 'gpu'} failure (${code}${describeExitCode(code) ? `; ${describeExitCode(code)}` : ''})`,
+        });
         status.forceCpu = true;
         status.restartCount += 1;
         status.running = false;
@@ -439,6 +543,14 @@ function createSidecarManager(deps) {
       if (status.restartCount < MAX_RESTART_ATTEMPTS) {
         status.restartCount += 1;
         _log.warn(`[sidecar-manager] Unexpected exit (${code}), restart ${status.restartCount}`);
+        notify({
+          type: 'exit',
+          backend: spawnBackend,
+          code,
+          exitCodeLabel: describeExitCode(code),
+          reason: `unexpected-exit (restart ${status.restartCount})`,
+          stderrTail: accelStderr.slice(-4000),
+        });
         status.running = false;
         emit();
         start(options).catch(() => {});
@@ -447,6 +559,13 @@ function createSidecarManager(deps) {
 
       status.permanentWasmFallback = true;
       _log.warn('[sidecar-manager] Max restarts exceeded — WASM fallback');
+      notify({
+        type: 'fallback',
+        from: spawnBackend,
+        to: 'wasm-cpu',
+        reason: `Max restarts exceeded after exit (${code}${describeExitCode(code) ? `; ${describeExitCode(code)}` : ''})`,
+        stderrTail: accelStderr.slice(-4000),
+      });
       status.running = false;
       status.pid = null;
       emit();
@@ -461,6 +580,13 @@ function createSidecarManager(deps) {
       if (childProcess === spawnedProcess) await stop();
       if (!status.forceCpu && options?.retryCpu !== false) {
         status.forceCpu = true;
+        notify({
+          type: 'fallback',
+          from: spawnBackend,
+          to: 'cpu',
+          reason: 'CPU fallback after GPU startup failure (health check failed)',
+          stderrTail: accelStderr.slice(-4000),
+        });
         return start({
           ...options,
           forceCpu: true,
@@ -475,6 +601,13 @@ function createSidecarManager(deps) {
       }
       status.permanentWasmFallback = true;
       emit();
+      notify({
+        type: 'fallback',
+        from: spawnBackend,
+        to: 'wasm-cpu',
+        reason: spawnedProcess.exitCode != null ? 'sidecar-exited-during-startup' : 'health-check-failed',
+        stderrTail: accelStderr.slice(-4000),
+      });
       return {
         ok: false,
         reason: spawnedProcess.exitCode != null ? 'sidecar-exited-during-startup' : 'health-check-failed',
@@ -488,10 +621,11 @@ function createSidecarManager(deps) {
     client = _createClient(port);
     status.running = true;
     emit();
+    notify({ type: 'healthy', backend: spawnBackend, port, pid: status.pid });
     return { ok: true, port };
   }
 
-  async function stop() {
+  async function stop(options) {
     intentionalStop = true;
     if (childProcess && !childProcess.killed) {
       childProcess.kill('SIGTERM');
@@ -503,6 +637,16 @@ function createSidecarManager(deps) {
     status.running = false;
     status.port = null;
     status.pid = null;
+    // User override / explicit restart must be allowed to try GPU again.
+    if (options && options.resetFallbacks) {
+      status.forceCpu = false;
+      status.permanentWasmFallback = false;
+      status.restartCount = 0;
+      status.backend = null;
+      status.variant = null;
+      status.binaryPath = null;
+      _log.info('[sidecar-manager] stop — fallbacks cleared (ready for new backend selection)');
+    }
     emit();
   }
 

@@ -40,6 +40,11 @@ const FORCED_NATIVE_OVERRIDES = new Set([
   'sidecar-npu',
   'sidecar-cpu',
   'vulkan',
+  'cuda',
+  'rocm',
+  'metal',
+  'openvino-gpu',
+  'openvino-npu',
   'openvino-cpu',
 ]);
 

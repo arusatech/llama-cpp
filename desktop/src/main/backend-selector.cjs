@@ -14,10 +14,31 @@ const VALID_OVERRIDES = [
   'sidecar-gpu',
   'sidecar-cpu',
   'wasm-cpu',
-  // Explicit pins for Settings testing
+  // Explicit pins (Settings Active backend dropdown)
   'vulkan',
+  'cuda',
+  'rocm',
+  'metal',
+  'openvino-gpu',
   'openvino-cpu',
+  'openvino-npu',
 ];
+
+/** Human labels for Settings / diagnostics. */
+const OVERRIDE_LABELS = {
+  auto: 'Auto (recommended)',
+  vulkan: 'Vulkan GPU',
+  cuda: 'CUDA GPU',
+  rocm: 'ROCm GPU',
+  metal: 'Metal GPU',
+  'openvino-gpu': 'OpenVINO GPU',
+  'openvino-npu': 'OpenVINO NPU',
+  'openvino-cpu': 'OpenVINO CPU',
+  'sidecar-gpu': 'Native GPU (best available)',
+  'sidecar-npu': 'Native NPU (best available)',
+  'sidecar-cpu': 'Native CPU (OpenBLAS)',
+  'wasm-cpu': 'WASM CPU',
+};
 
 function getGpuRank(platform = process.platform) {
   if (platform === 'darwin') {
@@ -121,12 +142,28 @@ function selectBackend(probeResult, userOverride, deps) {
   if (userOverride === 'wasm-cpu') {
     return { type: 'wasm-cpu', gpuBackend: null, variant: null, reason: 'User selected WASM CPU' };
   }
-  if (userOverride === 'vulkan') {
+  if (userOverride === 'vulkan' || userOverride === 'cuda' || userOverride === 'rocm' || userOverride === 'metal') {
     return {
       type: 'sidecar-gpu',
-      gpuBackend: 'vulkan',
-      variant: backendToVariant('vulkan', platform),
-      reason: 'User selected Vulkan GPU',
+      gpuBackend: userOverride,
+      variant: backendToVariant(userOverride, platform),
+      reason: `User selected ${userOverride} GPU`,
+    };
+  }
+  if (userOverride === 'openvino-gpu') {
+    return {
+      type: 'sidecar-gpu',
+      gpuBackend: 'openvino-gpu',
+      variant: backendToVariant('openvino-gpu', platform),
+      reason: 'User selected OpenVINO GPU',
+    };
+  }
+  if (userOverride === 'openvino-npu') {
+    return {
+      type: 'sidecar-npu',
+      gpuBackend: 'openvino-npu',
+      variant: backendToVariant('openvino-npu', platform),
+      reason: 'User selected OpenVINO NPU',
     };
   }
   if (userOverride === 'openvino-cpu') {
@@ -204,6 +241,120 @@ function selectBackend(probeResult, userOverride, deps) {
   };
 }
 
+/**
+ * Build Settings dropdown options from hardware probe + optional binary check.
+ * Unavailable options stay listed but `available: false` so the UI can disable them.
+ *
+ * @param {object} probeResult
+ * @param {object} [deps]
+ * @returns {Array<{ value: string, label: string, available: boolean, reason: string, kind: string }>}
+ */
+function listBackendOptions(probeResult, deps) {
+  const platform = (deps && deps.platform) || process.platform;
+  const backends = (probeResult && probeResult.backends) || [];
+  const byName = {};
+  for (const b of backends) {
+    if (b && b.name) byName[b.name] = b;
+  }
+  const hw = (name) => !!(byName[name] && byName[name].available);
+  const hwReason = (name, missing) =>
+    (byName[name] && byName[name].reason) || missing;
+
+  const binOk = (variant) => variantBinaryExists(variant, deps);
+  const binReason = (variant) =>
+    binOk(variant) ? `sidecar binary ${variant} present` : `sidecar binary '${variant}' not packaged`;
+
+  const hasAnyGpu = backends.some((b) => b.kind === 'gpu' && b.available);
+  const hasAnyNpu = backends.some((b) => b.kind === 'npu' && b.available);
+  const hasOpenvinoRuntime = hw('openvino-gpu') || hw('openvino-npu');
+
+  /** @type {Array<{ value: string, label: string, available: boolean, reason: string, kind: string }>} */
+  const options = [
+    {
+      value: 'auto',
+      label: OVERRIDE_LABELS.auto,
+      available: true,
+      reason: 'Pick best backend for this machine',
+      kind: 'auto',
+    },
+  ];
+
+  const pushHw = (value, probeName, variant, kind) => {
+    // Skip platform-irrelevant entries (e.g. Metal on Windows).
+    if (platform !== 'darwin' && (value === 'metal' || probeName === 'coreml-npu')) return;
+    if (platform === 'darwin' && (value === 'vulkan' || value === 'cuda' || value === 'rocm')) return;
+
+    const hardwareOk = hw(probeName);
+    const binaryOk = variant == null ? true : binOk(variant);
+    const available = hardwareOk && binaryOk;
+    let reason = '';
+    if (!hardwareOk) reason = hwReason(probeName, `${probeName} not detected`);
+    else if (!binaryOk) reason = binReason(variant);
+    else reason = hwReason(probeName, 'available');
+    options.push({
+      value,
+      label: OVERRIDE_LABELS[value] || value,
+      available,
+      reason,
+      kind,
+    });
+  };
+
+  pushHw('vulkan', 'vulkan', 'vulkan', 'gpu');
+  pushHw('cuda', 'cuda', 'cuda', 'gpu');
+  pushHw('rocm', 'rocm', 'rocm', 'gpu');
+  pushHw('metal', 'metal', 'metal', 'gpu');
+  pushHw('openvino-gpu', 'openvino-gpu', 'openvino', 'gpu');
+  pushHw('openvino-npu', 'openvino-npu', 'openvino', 'npu');
+
+  {
+    const binaryOk = binOk('openvino');
+    const available = hasOpenvinoRuntime && binaryOk;
+    options.push({
+      value: 'openvino-cpu',
+      label: OVERRIDE_LABELS['openvino-cpu'],
+      available,
+      reason: !hasOpenvinoRuntime
+        ? 'OpenVINO runtime not detected'
+        : !binaryOk
+          ? binReason('openvino')
+          : 'OpenVINO runtime found (device=CPU)',
+      kind: 'cpu',
+    });
+  }
+
+  options.push({
+    value: 'sidecar-gpu',
+    label: OVERRIDE_LABELS['sidecar-gpu'],
+    available: hasAnyGpu,
+    reason: hasAnyGpu ? 'At least one GPU backend detected' : 'No GPU detected',
+    kind: 'gpu',
+  });
+  options.push({
+    value: 'sidecar-npu',
+    label: OVERRIDE_LABELS['sidecar-npu'],
+    available: hasAnyNpu,
+    reason: hasAnyNpu ? 'At least one NPU backend detected' : 'No NPU detected',
+    kind: 'npu',
+  });
+  options.push({
+    value: 'sidecar-cpu',
+    label: OVERRIDE_LABELS['sidecar-cpu'],
+    available: true,
+    reason: 'Native CPU sidecar always available',
+    kind: 'cpu',
+  });
+  options.push({
+    value: 'wasm-cpu',
+    label: OVERRIDE_LABELS['wasm-cpu'],
+    available: true,
+    reason: 'In-process WASM always available',
+    kind: 'cpu',
+  });
+
+  return options;
+}
+
 module.exports = {
   selectBackend,
   getUserOverride,
@@ -212,6 +363,8 @@ module.exports = {
   getGpuRank,
   backendToVariant,
   variantBinaryExists,
+  listBackendOptions,
+  OVERRIDE_LABELS,
   NPU_RANK,
   VALID_OVERRIDES,
 };
