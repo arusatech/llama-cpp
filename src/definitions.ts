@@ -17,7 +17,14 @@ export interface NativeContextParams {
   n_batch?: number;
   n_ubatch?: number;
 
+  /** Number of threads used for single-token generation. */
   n_threads?: number;
+
+  /**
+   * Number of threads used for prompt and batch processing.
+   * Defaults to `n_threads` when omitted.
+   */
+  n_threads_batch?: number;
 
   /**
    * Path to draft model for speculative decoding (mobile optimization)

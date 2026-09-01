@@ -273,6 +273,12 @@ static void apply_params_from_jsobject(JNIEnv* env, jobject params, common_param
             };
             readInt("n_ctx", cparams.n_ctx);
             readInt("n_batch", cparams.n_batch);
+            readInt("n_ubatch", cparams.n_ubatch);
+            int n_threads = cparams.cpuparams.n_threads;
+            readInt("n_threads", n_threads);
+            cparams.cpuparams.n_threads = n_threads;
+            cparams.cpuparams_batch.n_threads = n_threads;
+            readInt("n_threads_batch", cparams.cpuparams_batch.n_threads);
             readInt("n_gpu_layers", cparams.n_gpu_layers);
         } else if (env->ExceptionCheck()) {
             env->ExceptionClear();
@@ -409,8 +415,10 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
         tune_params_for_embedding_model(cparams);
 
         LOGI("Initialized common parameters, attempting to load model from: %s", full_model_path.c_str());
-        LOGI("Model parameters: n_ctx=%d, n_batch=%d, n_gpu_layers=%d, embedding=%s", 
-             cparams.n_ctx, cparams.n_batch, cparams.n_gpu_layers, cparams.embedding ? "true" : "false");
+        LOGI("Model parameters: n_ctx=%d, n_batch=%d, n_ubatch=%d, n_threads=%d, n_threads_batch=%d, n_gpu_layers=%d, embedding=%s",
+             cparams.n_ctx, cparams.n_batch, cparams.n_ubatch,
+             cparams.cpuparams.n_threads, cparams.cpuparams_batch.n_threads,
+             cparams.n_gpu_layers, cparams.embedding ? "true" : "false");
         
         // Try to load the model with error handling and signal protection
         bool load_success = false;
@@ -454,6 +462,9 @@ Java_ai_annadata_plugin_capacitor_LlamaCpp_initContextNative(
             ultra_minimal_params.model.path = full_model_path;
             ultra_minimal_params.n_ctx = 256;  // Very small context
             ultra_minimal_params.n_batch = 128; // Very small batch
+            ultra_minimal_params.n_ubatch = std::min(cparams.n_ubatch, ultra_minimal_params.n_batch);
+            ultra_minimal_params.cpuparams = cparams.cpuparams;
+            ultra_minimal_params.cpuparams_batch = cparams.cpuparams_batch;
             ultra_minimal_params.n_gpu_layers = 0;
             ultra_minimal_params.use_mmap = false; // Disable mmap to avoid memory issues
             ultra_minimal_params.use_mlock = false;
